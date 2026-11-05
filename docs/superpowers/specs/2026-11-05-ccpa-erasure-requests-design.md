@@ -63,8 +63,11 @@ Legal clock per request: the request must be acknowledged within **10 business d
 - New role **Compliance** (the Privacy team, which is Dana's team). Only Compliance can approve, decline, manage the checklist and close. **[decided]**
 - New setting **Head of Compliance** (a User). Receives day-40 escalations. **[decided]**
 - New setting **Personal fields** list: (doctype, field) rows for CRM Lead, CRM Deal, Contact (and its email/phone child tables), CRM Contacts (deal contact rows) and Address. It ships pre-filled with every field that identifies the person: **name (salutation, first/middle/last, full/lead name), email, phone/mobile, job title/designation, photo/image, address.** **[decided]** Admins can add rows. Gender is pre-filled as well. **[my call]** It's personal and adds nothing to reports.
-- Lead/deal `linkedin`, `twitter`, `facebook`, `website` are company fields (they sit with organization logo/description) and are **not** pre-filled. **[my call]** If Compliance disagrees, they can add them to the list.
-- Visibility: Compliance sees all requests. A logger sees and edits their own request in full only while it's *Logged*, so they can confirm matches. After they submit it, they see only the status and due dates. Other users don't see it. **[my call]** The request holds the original message and identifiers, which sales shouldn't browse.
+- Lead/deal social links (`linkedin`, `twitter`, `facebook`) are also pre-filled. **[decided]** They usually point to the person, and after erasure nothing in the CRM may identify her. `website` is the company's site and is not pre-filled. **[my call]**
+- Visibility **[decided]**:
+  - Compliance and Sales Managers see all requests in full. Sales Managers still can't approve.
+  - A logger sees and edits their own request in full only while it's *Logged*, so they can confirm matches. After they submit it, they see only the status and due dates.
+  - Nobody else sees requests at all.
 - New setting **Contract retention period**, set per counsel's instruction (see 5.11). **[decided that counsel sets it; setting is my call]**
 
 ### 5.2 The request record
@@ -128,7 +131,7 @@ If a request is logged late (e.g. received date already past day 30), the remind
 ### 5.6 What erasure does (on approval)
 **The approval screen [decided]** shows three things:
 1. What will be removed, each with a link and counts per kind.
-2. What will be kept: the organization, deal values/status/stage, the deals' own notes/tasks/files, lead/deal records as anonymized shells, email/call/note records as placeholders, and any retained-contract entry (5.11).
+2. What will be kept: the organization, deal values/status/stage, the notes/tasks/comments/files of open deals she was removed from, lead/deal records as anonymized shells, email/call/note records as placeholders, and any retained-contract entry (5.11).
 3. Open checklist items, and custom fields on lead/deal/contact that are not on the personal fields list. **[my call]**
 
 The approver types the request number to confirm. There is no undo. The approver must hold Compliance and must not be the logger. This is checked on the server, by user. **[decided]**
@@ -138,13 +141,14 @@ The approver types the request number to confirm. There is no undo. The approver
 | Where | What happens |
 |---|---|
 | Confirmed CRM Lead | Personal fields from the list are blanked. Mandatory name → `Erased person PDR-0001`. The record stays. |
-| Confirmed CRM Deal (only Won/Lost by now, because open ones put the request On Hold) | **Only she is removed from it. [decided]** Her row in the deal's contacts table is anonymized (`full_name` → placeholder; email/phone blanked); the `contact` link is kept to the anonymized contact. The deal's own personal fields (`email`, `mobile_no`, `phone`, names, job title…) are blanked **only where they hold her values**. Those fields are copied from the primary contact (`set_primary_email_mobile_no` in `crm_deal.py`), so another person's data there is left alone. **[my call]** The deal's notes, tasks, comments and files stay. Values, status and stage are untouched. |
+| Confirmed CRM Deal she is **still on** (only Won/Lost by now, because open ones put the request On Hold) | Her row in the deal's contacts table is anonymized (`full_name` → placeholder; email/phone blanked); the `contact` link is kept to the anonymized contact. The deal's own personal fields (`email`, `mobile_no`, `phone`, names, job title, social links…) are blanked **only where they hold her values**. Those fields are copied from the primary contact (`set_primary_email_mobile_no` in `crm_deal.py`), so another person's data there is left alone. **[my call]** The deal's notes, tasks, comments, emails and call logs are wiped the same way as on her lead and contact (rows below). **[decided]** Its files are deleted too. **[my call]** They'd otherwise be the one thing left that identifies her, such as a proposal addressed to her. Values, status and stage are untouched. |
+| Open deal she was **removed from** while On Hold | **[decided]** Only emails and calls with a confirmed address/number have their content wiped (rows below). The deal's other notes, tasks, comments and files stay. |
 | Confirmed Contact | Personal fields blanked (names → placeholder), email and phone child rows removed, photo file deleted. The record stays so deal links hold. **[my call]** |
 | Address linked to the contact | All fields blanked. **[my call]** |
-| Emails (Communication) linked to her confirmed lead or contact, or with a confirmed email address as sender/recipient/CC/BCC (on deals too) | **Never deleted. [decided]** Subject and content → `Content erased PDR-0001`. Each of her addresses in sender/recipients/CC/BCC → `Erased person PDR-0001`. Same for every such email, whoever else is on it. Attachments: see Files. |
-| Call logs linked to her confirmed lead or contact, or with a confirmed phone as from/to (on deals too) | Record kept. Her number → placeholder, `recording_url` cleared, linked note handled as Notes. If any had a recording, add checklist item "Delete recordings at provider (Twilio)". **[decided]** |
-| Notes, tasks, comments on her confirmed lead or contact (not on deals) | Record kept, text (title/content/description) → `Content erased PDR-0001`. Task status/dates/assignee kept. **[my call, accepted; narrowed to lead/contact by the deal decision]** |
-| Files attached to her confirmed lead or contact, or to the emails above (not other deal files) | File deleted. A placeholder text remains where the file was listed. **[my call, accepted]** |
+| Emails (Communication) linked to her confirmed lead, contact or a deal she is still on, or with a confirmed email address as sender/recipient/CC/BCC anywhere | **Never deleted. [decided]** Subject and content → `Content erased PDR-0001`. Each of her addresses in sender/recipients/CC/BCC → `Erased person PDR-0001`. Same for every such email, whoever else is on it. Attachments: see Files. |
+| Call logs linked to her confirmed lead, contact or a deal she is still on, or with a confirmed phone as from/to anywhere | Record kept. Her number → placeholder, `recording_url` cleared, linked note handled as Notes. If any had a recording, add checklist item "Delete recordings at provider (Twilio)". **[decided]** |
+| Notes, tasks, comments on her confirmed lead, contact, or a deal she is still on | Record kept, text (title/content/description) → `Content erased PDR-0001`. Task status/dates/assignee kept. **[decided]** |
+| Files attached to her confirmed lead, contact, a deal she is still on, or the emails above | File deleted. A placeholder text remains where the file was listed. **[my call, accepted]** |
 | Version (change history) of confirmed records | Old/new values of personal fields replaced with the placeholder. Non-personal changes (status etc.) kept. **[my call]** |
 | Deleted Document copies of her leads/contacts/deals/emails | Scrubbed the same way, or removed. **[my call]** |
 | Notifications, email queue, WhatsApp messages, event participants, failed lead-sync logs and enrichment-run changes mentioning her email/phone | Text/identifiers replaced with the placeholder. |
@@ -178,7 +182,13 @@ After 24 months the entry is deleted automatically (daily job). **[my call]**
   - Matching on arrival uses the request's confirmed identifiers while it's open, and the do-not-contact entries afterwards.
 
 ### 5.10 Outcome email
-Compliance writes and sends the answer to the requester. The CRM ships an email template, "Erasure outcome", for it. **[my call]** The template includes the known-limitation sentence **[decided]**: passing mentions of the person inside other people's records (for example a note on a deal) aren't searched for or erased.
+Compliance writes and sends the answer to the requester. The CRM ships an email template, "Erasure outcome", for it. **[my call]** The template must say **[decided]**:
+- **What was erased**, in plain categories (contact details, lead and deal records, emails, calls, notes, files), and whether it was done at external providers.
+- **Anything kept and why**, with each reason. Examples: name and contract reference under the signed-contract exception (5.11), or a partial denial and its reason.
+- **That a record of the request is kept.** This means the 24-month log entry, plus a do-not-contact entry that stops her details from being re-entered.
+- **The known limitation:** passing mentions of the person inside other people's records (for example a note on a deal) aren't searched for or erased.
+
+Compliance fills the request-specific parts before sending.
 
 ### 5.11 Signed contract or order exception [decided]
 If she signed a contract or order with Northpine, the CRM keeps **only her name and the contract reference**, for as long as counsel sets.
