@@ -34,8 +34,8 @@ class Targets:
 	and free of repeats.
 
 	"Erased records" are `leads`, `contacts` and `deals_still_on`. `deals_removed_from` are
-	confirmed deals she was taken off while the request was On Hold: only their emails and
-	calls that name her are erased, nothing else on the deal."""
+	confirmed deals the person was taken off while the request was On Hold: only their emails and
+	calls that name them are erased, nothing else on the deal."""
 
 	leads: list[str] = field(default_factory=list)
 	contacts: list[str] = field(default_factory=list)
@@ -52,7 +52,7 @@ class Targets:
 	recordings_present: bool = False
 
 	def erased_records(self) -> dict[str, list[str]]:
-		"""The leads, contacts and deals she is still on, by doctype."""
+		"""The leads, contacts and deals the person is still on, by doctype."""
 		return {"CRM Lead": self.leads, "Contact": self.contacts, "CRM Deal": self.deals_still_on}
 
 
@@ -252,8 +252,8 @@ def _organizations(targets: Targets) -> list[str]:
 
 
 def _kept_on_removed_deals(targets: Targets) -> list[dict]:
-	"""For each open deal she was removed from: its notes, tasks, comments and files that are
-	not being erased (notes of her calls and files of her emails are)."""
+	"""For each open deal the person was removed from: its notes, tasks, comments and files that
+	are not being erased (notes of their calls and files of their emails are)."""
 	erased = {
 		"FCRM Note": set(targets.notes),
 		"CRM Task": set(targets.tasks),
@@ -277,7 +277,7 @@ def _kept_on_removed_deals(targets: Targets) -> list[dict]:
 				{
 					"label": _("Notes, tasks, comments and files of {0} ({1})").format(deal, count),
 					"reason": _(
-						"She was removed from this open deal, so only her emails and calls are erased."
+						"Kept: the person was removed from this open deal before erasure, so only emails and calls naming them are erased."
 					),
 				}
 			)
@@ -300,7 +300,7 @@ def _keep_list(request, targets: Targets) -> list[dict]:
 			{
 				"label": _("Deal values, status and stage"),
 				"reason": _(
-					"Business figures; they don't identify her, and dashboard numbers must not change."
+					"Business figures; they don't identify the person, and dashboard numbers must not change."
 				),
 			}
 		)

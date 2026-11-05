@@ -18,7 +18,7 @@ PHONE = "+19165550100"
 
 def confirmed_request(lead, contact, deal, removed_from_deal=False, **values):
 	"""A request with the person's lead, contact and deal confirmed. `removed_from_deal`
-	marks the deal as one she was taken off while the request was On Hold."""
+	marks the deal as one the person was taken off while the request was On Hold."""
 	values.setdefault(
 		"identifiers",
 		[{"kind": "Email", "value": EMAIL}, {"kind": "Phone", "value": PHONE}],
@@ -255,24 +255,6 @@ class TestPrivacyPreview(IntegrationTestCase):
 		self.assertEqual(sorted(remove_names(preview, "Call")), sorted([linked.name, by_phone.name]))
 		self.assertIn(note.name, remove_names(preview, "Note"))
 
-	def test_unlisted_custom_field_flagged(self):
-		create_custom_field(
-			"CRM Lead",
-			{"fieldname": "personal_mobile", "fieldtype": "Data", "label": "Personal mobile"},
-		)
-		create_custom_field("CRM Lead", {"fieldname": "is_vip", "fieldtype": "Check", "label": "Is VIP"})
-		frappe.clear_cache(doctype="CRM Lead")
-		lead, contact, deal = self.person()
-		request = confirmed_request(lead, contact, deal)
-
-		flagged = get_erasure_preview(request.name)["unlisted_custom_fields"]
-		fieldnames = [f["fieldname"] for f in flagged]
-		self.assertIn("personal_mobile", fieldnames)
-		self.assertNotIn("is_vip", fieldnames)
-		field = next(f for f in flagged if f["fieldname"] == "personal_mobile")
-		self.assertEqual(field["doctype"], "CRM Lead")
-		self.assertEqual(field["label"], "Personal mobile")
-
 	def test_recordings_present(self):
 		lead, contact, deal = self.person()
 		request = confirmed_request(lead, contact, deal)
@@ -312,3 +294,49 @@ class TestPrivacyPreview(IntegrationTestCase):
 		self.assertIn("Placeholder records", labels)
 		self.assertIn("MSA-2025-014", labels)
 		self.assertTrue(all(item["reason"] for item in keep))
+
+
+class TestPrivacyPreviewCustomFields(IntegrationTestCase):
+	"""Creating a Custom Field alters the table, and that commits: it would release a
+	savepoint taken in setUp. So this class takes no savepoint up front. The test creates the
+	fields first, takes a savepoint after the commit, and removes the fields explicitly."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		ensure_privacy_setup()
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.flags.privacy_system_write = False
+
+	def add_custom_field(self, doctype, values):
+		create_custom_field(doctype, values)
+		name = frappe.db.get_value("Custom Field", {"dt": doctype, "fieldname": values["fieldname"]})
+		self.addCleanup(frappe.delete_doc, "Custom Field", name, force=True, ignore_permissions=True)
+
+	def test_unlisted_custom_field_flagged(self):
+		# Cleanups run last in, first out: roll back the request, delete the fields, then
+		# clear the cache and commit the deletions.
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(frappe.clear_cache, doctype="CRM Lead")
+		self.add_custom_field(
+			"CRM Lead",
+			{"fieldname": "personal_mobile", "fieldtype": "Data", "label": "Personal mobile"},
+		)
+		self.add_custom_field("CRM Lead", {"fieldname": "is_vip", "fieldtype": "Check", "label": "Is VIP"})
+		frappe.clear_cache(doctype="CRM Lead")
+		frappe.db.commit()
+
+		# The fields are committed; everything from here on is rolled back.
+		frappe.db.savepoint(SAVEPOINT)
+		self.addCleanup(frappe.db.rollback, save_point=SAVEPOINT)
+		request = make_request(identifiers=[{"kind": "Email", "value": EMAIL}])
+
+		flagged = get_erasure_preview(request.name)["unlisted_custom_fields"]
+		fieldnames = [f["fieldname"] for f in flagged]
+		self.assertIn("personal_mobile", fieldnames)
+		self.assertNotIn("is_vip", fieldnames)
+		field = next(f for f in flagged if f["fieldname"] == "personal_mobile")
+		self.assertEqual(field["doctype"], "CRM Lead")
+		self.assertEqual(field["label"], "Personal mobile")
