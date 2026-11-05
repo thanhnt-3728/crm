@@ -430,6 +430,24 @@ class TestPrivacyMatching(IntegrationTestCase):
 		deal.save()
 		self.assertEqual(self.status_of(r), "Awaiting Sign-off")
 
+	def test_failing_hold_check_never_stops_the_deal_save(self):
+		r, _lead, contact, deal = self.held_request()
+		deal.contacts = [row for row in deal.contacts if row.contact != contact.name]
+		with (
+			patch("crm.privacy.matching.open_deals_with_person", side_effect=Exception("boom")),
+			patch("crm.privacy.matching.frappe.log_error") as log_error,
+		):
+			deal.save()  # must not raise
+		self.assertFalse(frappe.db.exists("CRM Contacts", {"parent": deal.name, "contact": contact.name}))
+		self.assertEqual(self.status_of(r), "On Hold")
+		ours = [c for c in log_error.call_args_list if c.kwargs.get("title") == "Erasure hold check failed"]
+		self.assertEqual(len(ours), 1)
+		self.assertNotIn("marisol", ours[0].kwargs["message"].lower())
+		# The half-done check was undone: the match row is not marked either.
+		self.assertFalse(
+			frappe.db.exists("CRM Erasure Match", {"parent": r.name, "removed_from_open_deal": 1})
+		)
+
 	# -- records created while a request is open -----------------------------------------------
 
 	def compliance_notices(self, request):

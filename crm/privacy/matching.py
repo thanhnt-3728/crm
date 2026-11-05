@@ -17,6 +17,7 @@ from crm.utils import normalize_phone, phone_search_digits
 
 REQUEST = "CRM Erasure Request"
 OPEN_DEAL_TYPES = ("Open", "Ongoing", "On Hold")
+HOLD_SAVEPOINT = "privacy_hold_check"
 NEW_MATCH_SAVEPOINT = "privacy_new_match"
 # A new record is added to a request's matches only before approval; later the erasure
 # job holds the request (and would lose a row saved meanwhile).
@@ -369,7 +370,22 @@ def submit_request(request_name: str) -> str:
 def on_deal_update(doc, method=None) -> None:
 	"""Deal on_update hook. For each request On Hold, note the match row when the
 	requester was taken off this deal, and release the hold once no confirmed contact is on
-	an open deal any more."""
+	an open deal any more. Never stops the deal from saving: a failure is logged and the
+	request stays On Hold, to be released by a later deal save."""
+	try:
+		frappe.db.savepoint(HOLD_SAVEPOINT)
+		_release_holds(doc)
+	except Exception:
+		# Undo a half-done check; the deal's own save stands.
+		frappe.db.rollback(save_point=HOLD_SAVEPOINT)
+		# Fixed message: no traceback with locals, nothing personal.
+		frappe.log_error(
+			title="Erasure hold check failed",
+			message=f"Could not re-check the erasure requests on hold after deal {doc.name} was saved.",
+		)
+
+
+def _release_holds(doc) -> None:
 	if not frappe.db.table_exists(REQUEST):
 		return
 	held = frappe.get_all(REQUEST, filters={"status": "On Hold"}, pluck="name")
