@@ -269,12 +269,7 @@ const isCollapsed = computed(() => isSidebarCollapsed.value && !props.mobile)
 const isFCSite = ref(window.is_fc_site)
 const isDemoSite = ref(window.is_demo_site)
 
-const links = computed(() =>
-  getNavigationItems({
-    mobile: props.mobile,
-    privacy: isCompliance() || isManager(),
-  }),
-)
+const links = getNavigationItems({ mobile: props.mobile })
 
 const allViews = computed(() => {
   let _views = [
@@ -282,7 +277,7 @@ const allViews = computed(() => {
       name: 'All Views',
       hideLabel: true,
       opened: true,
-      views: links.value.map((link) => ({
+      views: links.map((link) => ({
         label: link.label,
         icon: link.icon,
         key: link.route,
@@ -398,7 +393,7 @@ function toggleHelpModal() {
 
 // onboarding
 const { user } = sessionStore()
-const { users, isManager, isCompliance } = usersStore()
+const { users, isManager } = usersStore()
 const { isOnboardingStepsCompleted, setUp } = useOnboarding('frappecrm')
 const { flushPendingSteps } = useCrmOnboarding()
 

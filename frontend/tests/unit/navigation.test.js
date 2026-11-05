@@ -14,4 +14,13 @@ describe('navigationItems', () => {
     expect(mobileRoutes).not.toContain('Calendar')
     expect(mobileRoutes).toContain('Leads')
   })
+
+  it('lists privacy requests for every user on desktop', () => {
+    const routes = getNavigationItems().map((item) => item.route)
+    expect(routes).toContain('ErasureRequests')
+    // the item takes no role switch: the server decides what each user sees
+    expect(
+      navigationItems.find((item) => item.route === 'ErasureRequests'),
+    ).not.toHaveProperty('privacyOnly')
+  })
 })

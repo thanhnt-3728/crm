@@ -28,17 +28,13 @@ export const navigationItems = [
     icon: LucideShieldCheck,
     route: 'ErasureRequests',
     desktopOnly: true,
-    privacyOnly: true,
   },
 ]
 
-// `privacy` is true for users who may see privacy requests (Compliance and
-// managers); the server still decides what each of them can open.
-export function getNavigationItems({ mobile = false, privacy = false } = {}) {
+// Privacy requests are listed for every CRM user: anyone can log one, and the
+// server shows each user only the requests they may see.
+export function getNavigationItems({ mobile = false } = {}) {
   return navigationItems.filter(
-    (item) =>
-      router.hasRoute(item.route) &&
-      (!mobile || !item.desktopOnly) &&
-      (!item.privacyOnly || privacy),
+    (item) => router.hasRoute(item.route) && (!mobile || !item.desktopOnly),
   )
 }
