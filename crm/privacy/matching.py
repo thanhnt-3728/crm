@@ -170,6 +170,22 @@ def call_logs_matching(phones: list[str]) -> set[str]:
 	}
 
 
+def wa_profiles_matching(phones: list[str]) -> set[str]:
+	"""Names of the WhatsApp profiles (`WA Profile`, one per chat partner) of the phones.
+	Empty when the WhatsApp app is not installed."""
+	patterns = [pattern for pattern in map(_wildcard_digits, phones) if pattern]
+	if not patterns or not frappe.db.table_exists("WA Profile"):
+		return set()
+	table = frappe.qb.DocType("WA Profile")
+	query = (
+		frappe.qb.from_(table)
+		.select(table.name, table.phone_number)
+		.where(Criterion.any([table.phone_number.like(pattern) for pattern in patterns]))
+	)
+	phone_set = set(phones)
+	return {row.name for row in query.run(as_dict=True) if normalize_phone(row.phone_number) in phone_set}
+
+
 def _match_count(kind: str, value: str) -> int:
 	"""How many leads, contacts, deals, Communications and call logs contain the normalized
 	identifier."""

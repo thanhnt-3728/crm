@@ -243,6 +243,34 @@ class TestPrivacyPreview(IntegrationTestCase):
 		self.assertEqual(remove_names(preview, "Address"), [address.name])
 		self.assertEqual(preview["counts"]["Address"], 1)
 
+	def test_shared_address_is_listed_as_kept(self):
+		lead, contact, deal = self.person()
+		org = frappe.get_doc(
+			{"doctype": "CRM Organization", "organization_name": "Preview Shared Org"}
+		).insert(ignore_permissions=True)
+		shared = frappe.get_doc(
+			{
+				"doctype": "Address",
+				"address_title": "Shared Office",
+				"address_line1": "1 Market Street",
+				"city": "Sacramento",
+				"country": "United States",
+				"links": [
+					{"link_doctype": "Contact", "link_name": contact.name},
+					{"link_doctype": "CRM Organization", "link_name": org.name},
+				],
+			}
+		).insert(ignore_permissions=True)
+		request = confirmed_request(lead, contact, deal)
+
+		# The executor still gets it (to take her link off it)...
+		self.assertIn(shared.name, collect_targets(request).addresses)
+		# ...but erasure keeps it, so the approval screen says so.
+		preview = get_erasure_preview(request.name)
+		self.assertNotIn(shared.name, remove_names(preview, "Address"))
+		self.assertEqual(preview["counts"]["Address"], 0)
+		self.assertTrue(any("Shared address" in item["label"] for item in preview["keep"]))
+
 	def test_call_logs_and_their_notes_are_targets(self):
 		lead, contact, deal = self.person()
 		note = make_note(title="Written on the call")

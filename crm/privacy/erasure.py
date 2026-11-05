@@ -1,9 +1,13 @@
-"""Carrying out an approved erasure request (spec 5.6).
+"""Carrying out an approved erasure request (spec 5.6, 5.9, 5.11).
 
 Records: the person's leads, contacts, addresses and the deals they are still on keep
 existing as anonymized shells, so links and dashboard numbers hold. Contacts and addresses,
 whose names are built from the person's name, are renamed to the placeholder. Their change
 history and any Deleted Document copies that name the person are scrubbed too.
+
+Content (emails, calls, notes, files and the other places that hold the person's text) is
+erased by `crm.privacy.erasure_content`. `run_erasure`, the background job, runs both as
+one all-or-nothing transaction.
 
 Nothing here calls `doc.save()` on an erased record: writes go through
 `frappe.db.set_value(..., update_modified=False)` and `frappe.db.delete`, so no new
@@ -16,12 +20,24 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 import frappe
+from frappe import _
+from frappe.utils import add_months, now_datetime, today
 from pypika.functions import Lower
 
-from crm.privacy import personal_fields
-from crm.privacy.identifiers import normalize, normalize_email, text_contains_email, text_contains_phone
+from crm.privacy import personal_fields, settings, system_write
+from crm.privacy.identifiers import (
+	add_do_not_contact,
+	normalize,
+	normalize_email,
+	text_contains_email,
+	text_contains_phone,
+)
 from crm.privacy.matching import active_identifiers, confirmed
+from crm.privacy.preview import TWILIO_CHECKLIST_ITEM, collect_targets
 from crm.utils import normalize_phone, phone_search_digits
+
+REQUEST = "CRM Erasure Request"
+CHECKLIST_TWILIO = TWILIO_CHECKLIST_ITEM
 
 # Deleted copies of these doctypes are removed when they name the person.
 DELETED_DOCTYPES = (
@@ -620,7 +636,8 @@ def erase_records(request, targets) -> None:
 
 	An address also linked to someone or something else is not erased: only the person's
 	link to it is removed, and it is dropped from `targets.addresses`. `request.matches`,
-	`targets.contacts` and `targets.addresses` are updated in place to the new names."""
+	`targets.contacts` and `targets.addresses` are updated in place to the new names, and
+	`targets.renames` is set to {old name: new name}."""
 	placeholder = placeholder_person(request.name)
 	# Read what is the person's before any of it is blanked.
 	person = _read_person(request)
@@ -640,6 +657,7 @@ def erase_records(request, targets) -> None:
 	renames = _rename("Contact", targets.contacts, placeholder)
 	renames |= _rename("Address", targets.addresses, f"{placeholder}-Address")
 	_apply_renames(request, targets, renames)
+	targets.renames = renames
 	_retitle_contact_links(targets.contacts, placeholder)
 
 	all_contacts = old_contacts | set(targets.contacts)
@@ -659,3 +677,120 @@ def erase_records(request, targets) -> None:
 	deleted = _deleted_documents_naming(sorted(person.emails), sorted(person.phones))
 	if deleted:
 		frappe.db.delete("Deleted Document", {"name": ["in", sorted(deleted)]})
+
+
+# -- Content (crm.privacy.erasure_content) -----------------------------------------------
+# Imported when called: that module builds on this one.
+
+
+def erase_content(request, targets, person_values: set[str]) -> None:
+	"""Erase the emails, calls, notes, tasks, comments, files and the other places in
+	`targets` that hold the person's text (`crm.privacy.erasure_content.erase_content`).
+	`person_values` is what `erase_person_values` returned before `erase_records` ran."""
+	from crm.privacy import erasure_content
+
+	erasure_content.erase_content(request, targets, person_values)
+
+
+def erase_communications(names: list[str], request_name: str, person_values: set[str]) -> None:
+	"""Wipe the emails `names` (`crm.privacy.erasure_content.erase_communications`)."""
+	from crm.privacy import erasure_content
+
+	erasure_content.erase_communications(names, request_name, person_values)
+
+
+# -- The job -----------------------------------------------------------------------------
+
+
+def _first_line(text: str | None) -> str:
+	return next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
+
+
+def _retained_name(request, person_values: set[str]) -> str:
+	"""The person's name on a retained contract: the first requester name, or else a full
+	name read from the records before they were erased."""
+	name = _first_line(request.requester_names)
+	if name:
+		return name
+	names = sorted(value for value in person_values if "@" not in value and not value.startswith("+"))
+	return next((value for value in names if " " in value), names[0] if names else "")
+
+
+def _retain_contracts(request, person_values: set[str]) -> None:
+	"""One retained-contract entry per line of the request's contract references (5.11)."""
+	references = [line.strip() for line in (request.contract_references or "").splitlines() if line.strip()]
+	if not references:
+		return
+	months = settings().contract_retention_months or 0
+	delete_after = add_months(today(), months) if months > 0 else None
+	person_name = _retained_name(request, person_values)
+	for reference in references:
+		frappe.get_doc(
+			{
+				"doctype": "CRM Retained Contract",
+				"person_name": person_name,
+				"contract_reference": reference,
+				"delete_after": delete_after,
+				"request": request.name,
+			}
+		).insert(ignore_permissions=True)
+
+
+def _add_twilio_item(request) -> None:
+	if any(row.description == CHECKLIST_TWILIO for row in request.checklist):
+		return
+	request.append("checklist", {"description": CHECKLIST_TWILIO, "auto_added": 1, "done": 0})
+
+
+def _erase(request) -> None:
+	# The person's values are read before the records holding them are blanked.
+	person_values = erase_person_values(request)
+	targets = collect_targets(request)
+	erase_records(request, targets)
+	erase_content(request, targets, person_values)
+
+	for kind in ("Email", "Phone"):
+		for value in active_identifiers(request, kind):
+			add_do_not_contact(kind, value)
+	_retain_contracts(request, person_values)
+
+	if targets.recordings_present:
+		_add_twilio_item(request)
+	request.status = "Erased"
+	request.erased_on = now_datetime()
+	request.erasure_error = None
+	with system_write():
+		request.save(ignore_permissions=True)
+
+
+def run_erasure(request_name: str) -> None:
+	"""The background job that carries out an approved request, all or nothing.
+
+	On success the request is `Erased` and everything is committed; files leave the disk
+	and the search index is updated only after that commit. On any error the whole erasure
+	is rolled back, the request goes back to `Awaiting Sign-off` with the error in
+	`erasure_error`, and the error is raised again for the job log."""
+	request = frappe.get_doc(REQUEST, request_name)
+	if request.status != "Erasing":
+		frappe.throw(
+			_("Request {0} is {1}, not Erasing: nothing was erased.").format(request_name, request.status)
+		)
+
+	previous = frappe.flags.in_erasure_job
+	# Lets the job add the Twilio checklist item, which only Compliance may otherwise do.
+	frappe.flags.in_erasure_job = True
+	try:
+		try:
+			_erase(request)
+			frappe.db.commit()
+		except Exception as e:
+			frappe.db.rollback()
+			failed = frappe.get_doc(REQUEST, request_name)
+			failed.status = "Awaiting Sign-off"
+			failed.erasure_error = str(e) or type(e).__name__
+			with system_write():
+				failed.save(ignore_permissions=True)
+			frappe.db.commit()
+			raise
+	finally:
+		frappe.flags.in_erasure_job = previous

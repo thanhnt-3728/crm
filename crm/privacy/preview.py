@@ -17,6 +17,7 @@ from crm.privacy.matching import (
 	call_logs_matching,
 	communications_matching,
 	confirmed,
+	wa_profiles_matching,
 )
 
 REQUEST = "CRM Erasure Request"
@@ -50,6 +51,9 @@ class Targets:
 	files: list[str] = field(default_factory=list)
 	wa_messages: list[str] = field(default_factory=list)
 	recordings_present: bool = False
+	# Filled in by `erase_records`: {old name: new name} of the contacts and addresses it
+	# renamed, so later steps can find the old names in history.
+	renames: dict[str, str] = field(default_factory=dict)
 
 	def erased_records(self) -> dict[str, list[str]]:
 		"""The leads, contacts and deals the person is still on, by doctype."""
@@ -158,8 +162,29 @@ def collect_targets(request) -> Targets:
 	targets.tasks = _sorted(_by_reference("CRM Task", "reference_doctype", "reference_docname", erased))
 	targets.comments = _sorted(_by_reference("Comment", "reference_doctype", "reference_name", erased))
 
-	# Files attached to erased records or to their emails, and the photos on leads/contacts.
-	attached_to = {**erased, "Communication": targets.communications}
+	# WhatsApp messages on erased leads and deals, and every chat with an active phone.
+	if frappe.db.table_exists("WA Message"):
+		wa_messages = _by_reference(
+			"WA Message",
+			"reference_doctype",
+			"reference_docname",
+			{"CRM Lead": targets.leads, "CRM Deal": targets.deals_still_on},
+		)
+		profiles = wa_profiles_matching(phones)
+		if profiles:
+			wa_messages.update(
+				frappe.get_all("WA Message", filters={"to": ["in", sorted(profiles)]}, pluck="name")
+			)
+		targets.wa_messages = _sorted(wa_messages)
+
+	# Files attached to erased records, to their emails, comments and WhatsApp messages, and
+	# the photos on leads/contacts.
+	attached_to = {
+		**erased,
+		"Communication": targets.communications,
+		"Comment": targets.comments,
+		"WA Message": targets.wa_messages,
+	}
 	files = _by_reference("File", "attached_to_doctype", "attached_to_name", attached_to)
 	images = _images("CRM Lead", targets.leads) | _images("Contact", targets.contacts)
 	if images:
@@ -168,16 +193,6 @@ def collect_targets(request) -> Targets:
 
 	if targets.contacts:
 		targets.addresses = _sorted(_by_link_rows("Dynamic Link", "Address", {"Contact": targets.contacts}))
-
-	if frappe.db.table_exists("WA Message"):
-		targets.wa_messages = _sorted(
-			_by_reference(
-				"WA Message",
-				"reference_doctype",
-				"reference_docname",
-				{"CRM Lead": targets.leads, "CRM Deal": targets.deals_still_on},
-			)
-		)
 
 	return targets
 
@@ -284,7 +299,7 @@ def _kept_on_removed_deals(targets: Targets) -> list[dict]:
 	return kept
 
 
-def _keep_list(request, targets: Targets) -> list[dict]:
+def _keep_list(request, targets: Targets, shared_addresses=()) -> list[dict]:
 	keep = []
 
 	for organization in _organizations(targets):
@@ -346,6 +361,14 @@ def _keep_list(request, targets: Targets) -> list[dict]:
 			}
 		)
 
+	if shared_addresses:
+		keep.append(
+			{
+				"label": _("Shared address(es): {0}").format(len(shared_addresses)),
+				"reason": _("Also used by others: only the link to the person is removed."),
+			}
+		)
+
 	keep.extend(_kept_on_removed_deals(targets))
 
 	if (request.contract_references or "").strip():
@@ -392,7 +415,11 @@ def get_erasure_preview(request_name: str) -> dict:
 	request = frappe.get_doc(REQUEST, request_name)
 	request.check_permission("read")
 
+	from crm.privacy.erasure import split_addresses  # erasure imports this module
+
 	targets = collect_targets(request)
+	# Erasure only takes the person's link off an address others use too; list it as kept.
+	targets.addresses, shared = split_addresses(targets.addresses, targets.contacts)
 	remove = _remove_list(targets)
 	counts = {kind: 0 for kind in KINDS}
 	for item in remove:
@@ -401,7 +428,7 @@ def get_erasure_preview(request_name: str) -> dict:
 	return {
 		"remove": remove,
 		"counts": counts,
-		"keep": _keep_list(request, targets),
+		"keep": _keep_list(request, targets, shared),
 		"open_checklist": _open_checklist(request, targets),
 		"unlisted_custom_fields": _unlisted_custom_fields(),
 		"recordings_present": targets.recordings_present,
