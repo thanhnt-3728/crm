@@ -185,6 +185,8 @@ Click **Close request** on an Erased or Declined request. The CRM asks for:
 
 Keep the requester's email and details until you have replied. Closing wipes them.
 
+Closing also **erases the emails attached to the request**: inbound mail from the requester while the request was open. Their content, subject and the requester's addresses become placeholders, the same as in the erasure.
+
 **What stays after close:**
 
 - A **log entry** with only: date received, request type, how it arrived, date answered, outcome and denial reason. It is deleted automatically **24 months after the date answered** by a daily job.
@@ -255,62 +257,79 @@ yarn test:run
 
 Create these users:
 
-- **Tyler**: Sales User.
+- **Tyler**: Sales User. Logs the main request.
 - **Dana**: Sales User plus **Compliance** (the approver).
-- **Owen**: Sales User. Owns the deal that is open.
+- **Priya**: Sales User plus **Compliance** (a second approver, for the double-approval check).
+- **Sam**: Sales Manager, without Compliance.
+- **Owen**: Sales User. Owns the deals.
 - Optionally a Head of Compliance user, set in Settings -> Privacy.
 
 Add a custom field **Personal mobile** to CRM Lead (Settings -> Custom Fields). Do **not** add it to Personal fields yet.
 
-Create the data for **Marisol Vega** (`marisol.vega@sierrafoothills.example`, phone `(916) 555-0100`):
+Create the data for **Marisol Vega** (`marisol.vega@sierrafoothills.example`, phone `(916) 555-0100`) in the organization Sierra Foothills Dental Group:
 
-- A **lead** for Marisol, with Personal mobile set to `916-555-0199`.
-- Two **deals** converted from or linked to her, owned by Owen. Put one in **Negotiation** (an open status) and the other in **Won**. Give both a value.
-- A **contact** for Marisol, listed as a contact on both deals.
-- Several **emails** with her address, including one with a colleague CC'd, for example `"Marisol Vega" <Marisol.Vega@sierrafoothills.example>, bob@sierrafoothills.example`.
+- A **lead** for Marisol, with Personal mobile set to `916-555-0199`. Attach a file to it (for example `proposal.pdf`). Add a note and a task. Edit the lead's phone once, so that change history holds an old value.
+- A **duplicate lead** with Marisol's email, then delete it, so a Deleted Document copy exists.
+- A **contact** for Marisol, with an **Address** linked to it.
+- Three **deals**, all owned by Owen and each with a value:
+  - **Deal A** in **Negotiation** (an open status), listing Marisol's contact. Add a note and a file to it.
+  - **Deal B** in **Won**, with Marisol's contact as the primary contact (so the deal's own email, mobile and phone hold Marisol's values). Add a note and a file.
+  - **Deal C** in **Won**, where **Chris Lee** (another contact, with their own email, mobile and phone) is the primary contact and Marisol's contact is a second, non-primary contact.
+- Several **emails** with Marisol's address, including one with a colleague CC'd, for example `"Marisol Vega" <Marisol.Vega@sierrafoothills.example>, bob@sierrafoothills.example`.
 - A **call log** with a recording.
-- A note and a task on the lead.
+- On Deal A, a note that mentions "Marisol prefers Tuesdays". This is the known limitation: it is expected to survive.
 
 ### Script
 
 1. **Record the dashboard.** Open the dashboard and write down the lead count, the deal count, the won and ongoing deal values, and the breakdowns by status and source.
-2. **Log from the lead.** As Tyler, open Marisol's lead, click **Request erasure**, set the received date to a recent date, add her email and phone, and click **Log request**.
-   - Expect: a new `PDR-` number, status **Logged**, her lead as a confirmed match, and her contact and deals suggested as matches.
-3. **Confirm matches.** Confirm the contact and both deals. Check that her email and phone each show a match count.
+2. **Log from the lead.** As Tyler, open Marisol's lead, click **Request erasure**, set the received date to a recent date, add Marisol's email and phone, and click **Log request**.
+   - Expect: a new `PDR-` number, status **Logged**, the lead as a confirmed match, and Marisol's contact and the deals suggested as matches.
+3. **Confirm matches.** Confirm the contact and all three deals. Check that the email and the phone each show a match count.
 4. **Submit.** Click **Submit to Compliance**.
-   - Expect: status **On Hold**, because she is a contact on the Negotiation deal. Owen gets a notification and an email about that deal.
+   - Expect: status **On Hold**, because Marisol's contact is on Deal A, which is open. Owen gets a notification and an email about Deal A.
    - Expect: Tyler now sees only status, dates and days left.
 5. **Try to approve while On Hold** as Dana. Expect that **Approve** is not offered, and the API refuses it.
-6. **Resolve the hold.** As Owen, remove Marisol from the Negotiation deal's contacts and save.
-   - Expect: the request returns to **Awaiting Sign-off**, and her match on that deal shows **Removed from open deal**.
-7. **Check the approval rules.**
-   - As Tyler (the logger) and as a Sales Manager without Compliance: **Approve** is not available, and calling the endpoint is refused.
-   - As Dana: it is available.
-8. **Open the approval screen** as Dana.
-   - Expect: **Will be removed** lists the lead, the contact, the Won deal, her emails and calls, notes and tasks. **Will be kept** lists the organization, deal values and the Negotiation deal's own notes, tasks and files. **Needs attention** flags the custom field **Personal mobile**.
-9. **Add the custom field.** In Settings -> Privacy, add **CRM Lead -> Personal mobile** and save. Reopen the approval screen and confirm the flag is gone.
-10. **Approve.** Type the request number wrongly, then correctly, and click **Approve and erase**.
-    - Expect: status **Erasing**, then **Erased**. A second **Approve** click, or a second Compliance user, gets an error.
-11. **Check the erased data.**
-    - Lead: name is `Erased person PDR-xxxx`; email, phone and Personal mobile are blank. The lead still exists.
-    - Contact: blanked. Her email and phone rows are gone.
-    - Emails: content is `Content erased PDR-xxxx`; her address is replaced; **bob@...** is unchanged on the email with the CC.
+6. **Resolve the hold.** As Owen, remove Marisol's contact from Deal A's contacts and save.
+   - Expect: the request returns to **Awaiting Sign-off**, and the match on Deal A shows **Removed from open deal**.
+7. **Check who cannot approve.**
+   - As Tyler (the logger) and as Sam (Sales Manager without Compliance): **Approve** is not offered, and calling the endpoint is refused.
+   - As Dana: it is offered.
+8. **A logger with Compliance cannot approve.** As Dana, log a separate request from any unrelated lead and submit it.
+   - Expect: **Approve** is not offered to Dana on that request, and calling `crm.api.erasure.approve` as Dana is refused ("Only a Compliance user who did not log this request can approve it."). **Decline** is refused too.
+   - As Priya: **Approve** is offered. Decline this request as Priya with a reason, then close it as **Denied**, so it does not stay open.
+9. **Open the approval screen** as Dana, on Marisol's request.
+   - Expect: **Will be removed** lists the lead, the contact, Deals B and C, the emails and calls, notes, tasks and files. **Will be kept** lists the organization, deal values and Deal A's own notes, tasks and files. **Needs attention** flags the custom field **Personal mobile**.
+10. **Add the custom field.** In Settings -> Privacy, add **CRM Lead -> Personal mobile** and save. Reopen the approval screen and confirm the flag is gone.
+11. **Approve.** As Dana, type the request number wrongly (expect an error), then correctly, and click **Approve and erase**.
+    - Expect: status **Erasing**, then **Erased**. Have Priya call approve right after: expect an error, and only one erasure job in the background job list.
+12. **Check the erased data.**
+    - Lead: name is `Erased person PDR-xxxx`; email, phone and Personal mobile are blank. The lead still exists. Its note and task text is `Content erased PDR-xxxx`, with the task's status, dates and assignee kept. The attached file is gone.
+    - Contact: names are the placeholder, and the email and phone rows are gone. The Address linked to the contact has every field blank.
+    - Deal B (Won, Marisol primary): the contacts row is anonymized (name is the placeholder, email and phone blank, the contact link kept). The deal's own name, email, mobile and phone fields are blank. Its notes are erased and its file is gone. Its value, status and stage are unchanged.
+    - Deal C (Won, Chris Lee primary): Marisol's row is anonymized, but **Chris Lee's email, mobile and phone on the deal are untouched**.
+    - Deal A (Marisol's contact was removed): its own notes, tasks and files are still there, including the "Marisol prefers Tuesdays" note.
+    - Emails: content is `Content erased PDR-xxxx`; Marisol's address is replaced with `Erased person PDR-xxxx`, in any case or display-name form; `bob@sierrafoothills.example` is unchanged on the email with the CC.
     - Call log: number replaced, recording link cleared.
-    - The Negotiation deal (she was removed from it): its own notes and tasks are still there.
-    - On any deal where someone else is the primary contact, that person's email, mobile and phone on the deal are untouched.
-12. **Check the checklist.** Expect **Delete recordings at provider (Twilio)** on the request.
-13. **Check the dashboard.** Compare with step 1. **Every number and breakdown must be identical.**
-14. **Check the block.** Try to create a new lead with her email, then another with `916.555.0100` as the phone.
-    - Expect: both refused with "This person asked to be erased under a privacy request. Their details can't be added to the CRM." Re-adding her email to an existing record is refused too.
-15. **Send an email from her address** to a connected mailbox, while the request is not yet closed.
+13. **Check the checklist.** Expect **Delete recordings at provider (Twilio)** on the request.
+14. **Check the dashboard.** Compare with step 1. **Every number and breakdown must be identical.**
+15. **Sweep for what is left.** Take a backup (`bench --site <test-site> backup`) and search the SQL file, case-insensitively, for the email and every phone form:
+    ```bash
+    grep -i -E "marisol\.vega@sierrafoothills|555[-. )]*0100|555[-. ]*0199" <backup>.sql
+    ```
+    Then look in the Desk lists **Version** and **Deleted Document** (filter on the document types Lead, Deal, Contact and Communication) and open the duplicate lead's copy.
+    - Expect: no hits in the backup. The do-not-contact entries hold only scrambled hashes, so they do not match. The Version rows have placeholders where the email, phone and name were, and the Deleted Document copy of the duplicate lead is scrubbed or gone. The note on Deal A may still say "Marisol", which is the known limitation. Any other hit is a bug.
+16. **Check the block.** Try to create a new lead with Marisol's email, then another with `916.555.0100` as the phone, then a deal with a contact row holding either value.
+    - Expect: each is refused with "This person asked to be erased under a privacy request. Their details can't be added to the CRM." Changing an existing record's email to the erased one is refused too. A record saved without touching those fields still saves.
+17. **Send an email from Marisol's address** to a connected mailbox, while the request is Erased and not yet closed.
     - Expect: no lead is created and the email is attached to the request.
-16. **Try to close early.** As Dana, click **Close request**, enter a date answered and the outcome Completed.
+18. **Try to close early.** As Dana, click **Close request**, enter a date answered and the outcome Completed.
     - Expect: refused, because the Twilio item is open.
-17. **Tick the checklist item**, then close with **Completed**.
+19. **Tick the checklist item**, then close with **Completed**.
     - Expect: the request now holds only the log fields (received, type, how it arrived, answered, outcome and denial reason). Names, emails, phones, message, matches and checklist text are gone. **Kept until** shows a date 24 months after the answered date.
-18. **Check the block after close.** Repeat step 14. It must still be refused. Send another email from her address: expect no lead, no link, and a notification to Compliance.
-19. **Reminders.** Log a second request with a received date 41 days ago and run the scheduler (`bench --site <test-site> execute crm.privacy.reminders.send_due_reminders`).
+    - Expect: the email from step 17, still attached to the request, now has content `Content erased PDR-xxxx` and Marisol's address replaced. Closing erases emails attached to the request.
+20. **Check the block after close.** Repeat step 16. It must still be refused. Send another email from Marisol's address: expect no lead, no link, and a notification to Compliance. Repeat the sweep from step 15 and expect no new hits.
+21. **Reminders.** Log another request (as Tyler) with a received date 41 days ago and run the scheduler (`bench --site <test-site> execute crm.privacy.reminders.send_due_reminders`).
     - Expect: the acknowledgment, day-30 and day-40 reminders each go out once (notification and email), the day-40 one to the Head of Compliance. Run it again and expect nothing new.
-20. **Decline path.** Log a third request, submit it, and decline it as Dana with a reason. Try to close it as **Completed**: refused. Close it as **Denied** with a reason: allowed.
+22. **Decline path.** Log another request as Tyler, submit it, and decline it as Dana with a reason. Try to close it as **Completed**: refused. Close it as **Denied** with a reason: allowed.
 
 Record any step that does not behave as written and treat it as a bug.
