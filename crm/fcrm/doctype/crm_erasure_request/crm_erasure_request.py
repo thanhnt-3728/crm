@@ -6,6 +6,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, cstr, get_datetime, getdate, now_datetime
 
+from crm.privacy import has_compliance_role
 from crm.privacy.deadlines import acknowledge_by, respond_by
 
 FULL_ACCESS_ROLES = {"Compliance", "Sales Manager"}
@@ -27,6 +28,17 @@ PROTECTED_FIELDS = (
 	"day30_reminder_sent",
 	"day40_alert_sent",
 )
+
+# What identifies the requester and decides what is erased. Changed only through the
+# approval rules: by the logger while Logged, by Compliance until approval.
+CONTENT_FIELDS = ("requester_names", "original_message", "contract_references")
+CONTENT_TABLES = {
+	"matches": ("reference_doctype", "reference_name", "confirmed", "source", "removed_from_open_deal"),
+	"identifiers": ("kind", "value", "excluded"),
+}
+CHECK_COLUMNS = {"confirmed", "removed_from_open_deal", "excluded"}
+LOGGED = "Logged"
+COMPLIANCE_EDITABLE = ("Logged", "Awaiting Sign-off", "On Hold")
 
 
 class CRMErasureRequest(Document):
@@ -89,6 +101,7 @@ class CRMErasureRequest(Document):
 
 	def validate(self):
 		self.reject_protected_field_changes()
+		self.reject_content_changes()
 		self.set_deadlines()
 		self.guard_and_stamp_checklist()
 		self.validate_status_rules()
@@ -118,6 +131,32 @@ class CRMErasureRequest(Document):
 			return cint(old) != cint(new)
 		return cstr(old) != cstr(new)
 
+	def reject_content_changes(self):
+		"""A user save (REST, `frappe.client.set_value`) may change the requester's details,
+		matches, identifiers and contract references only as the approval rules allow: the
+		logger while the request is Logged, Compliance until it is approved. System writes
+		(erasure, close, new matches) are not users' edits."""
+		if self.is_new() or frappe.flags.privacy_system_write:
+			return
+		before = self.get_doc_before_save()
+		if before is None or not self._content_changed(before):
+			return
+		user = frappe.session.user
+		status = before.status
+		if before.logged_by == user and status == LOGGED:
+			return
+		if has_compliance_role(user) and status in COMPLIANCE_EDITABLE:
+			return
+		frappe.throw(_("You cannot change this request."), frappe.PermissionError)
+
+	def _content_changed(self, before) -> bool:
+		if any(cstr(before.get(f)) != cstr(self.get(f)) for f in CONTENT_FIELDS):
+			return True
+		return any(
+			_table_rows(before, table, columns) != _table_rows(self, table, columns)
+			for table, columns in CONTENT_TABLES.items()
+		)
+
 	def set_deadlines(self):
 		received = getdate(self.received_on)
 		self.acknowledge_by = acknowledge_by(received)
@@ -142,7 +181,7 @@ class CRMErasureRequest(Document):
 		old_rows = {row.name: row for row in (before.checklist if before else []) if row.name}
 
 		if not frappe.flags.in_erasure_job and self._checklist_changed(old_rows):
-			if "Compliance" not in frappe.get_roles():
+			if not has_compliance_role(frappe.session.user):
 				frappe.throw(_("Only Compliance can change the checklist."), frappe.PermissionError)
 
 		for row in self.checklist:
@@ -169,15 +208,30 @@ class CRMErasureRequest(Document):
 		)
 
 	def can_approve(self, user: str) -> bool:
-		"""Approval needs the Compliance role and a different person than the logger."""
-		return "Compliance" in frappe.get_roles(user) and user != self.logged_by
+		"""Approval needs the Compliance role, assigned to the user (the Administrator, who
+		gets every role, never approves), and a different person than the logger."""
+		return user != "Administrator" and user != self.logged_by and has_compliance_role(user)
+
+
+def _table_rows(doc, table: str, columns) -> list[tuple]:
+	"""The rows of a child table as comparable tuples, in any order. A client sends unset
+	values as "" or None and checks as 0 or None: none of that is a change."""
+	rows = []
+	for row in doc.get(table) or []:
+		rows.append(tuple(cint(row.get(c)) if c in CHECK_COLUMNS else cstr(row.get(c)) for c in columns))
+	return sorted(rows)
+
+
+# What a Sales Manager may do with any request: look, not change (Sales Managers usually
+# hold Sales User as well, whose DocPerm has write).
+READ_PTYPES = {None, "read", "select", "print", "email", "report", "export"}
 
 
 def has_permission(doc, ptype=None, user=None):
 	user = user or frappe.session.user
 	roles = set(frappe.get_roles(user))
 
-	if roles & FULL_ACCESS_ROLES:
+	if "Compliance" in roles:
 		return True
 
 	is_new = ptype == "create" or (hasattr(doc, "is_new") and doc.is_new())
@@ -185,7 +239,10 @@ def has_permission(doc, ptype=None, user=None):
 		# Any CRM user can log a request (spec 5.3).
 		return bool(roles & CRM_ROLES)
 
-	# The logger only sees their own request while it is still being put together.
+	if roles & FULL_ACCESS_ROLES and ptype in READ_PTYPES:
+		return True
+
+	# The logger only sees (and edits) their own request while it is still being put together.
 	return doc.get("logged_by") == user and doc.get("status") == LOGGER_VISIBLE_STATUS
 
 

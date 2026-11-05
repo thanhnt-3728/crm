@@ -9,7 +9,7 @@ from crm.fcrm.doctype.crm_erasure_request.crm_erasure_request import (
 	get_permission_query_conditions,
 	has_permission,
 )
-from crm.privacy import system_write
+from crm.privacy import has_compliance_role, system_write
 from crm.privacy.setup import ensure_privacy_setup
 
 USERS = {
@@ -205,6 +205,96 @@ class TestCRMErasureRequest(IntegrationTestCase):
 		self.assertTrue(r.can_approve("comp2@example.com"))
 		self.assertFalse(r.can_approve("salesmanager@example.com"))
 
+	def test_administrator_never_approves(self):
+		"""`get_roles("Administrator")` returns every role, Compliance included: approval
+		reads the role assignment, and refuses the Administrator even when assigned."""
+		r = make_request(logged_by="comp1@example.com")
+		self.assertIn("Compliance", frappe.get_roles("Administrator"))
+		self.assertFalse(has_compliance_role("Administrator"))
+		self.assertFalse(r.can_approve("Administrator"))
+
+		admin = frappe.get_doc("User", "Administrator")
+		admin.append_roles("Compliance")
+		admin.save(ignore_permissions=True)
+		self.addCleanup(lambda: frappe.get_doc("User", "Administrator").remove_roles("Compliance"))
+		self.assertTrue(has_compliance_role("Administrator"))
+		self.assertFalse(r.can_approve("Administrator"))
+
+	# -- content edits outside the approval rules --------------------------------------------
+
+	def rest_save(self, user, name, **values):
+		"""What a REST PUT or frappe.client.set_value does: load, change, save as the user."""
+		frappe.set_user(user)
+		doc = frappe.get_doc("CRM Erasure Request", name)
+		doc.update(values)
+		doc.save()
+		return doc
+
+	def test_rest_content_edit_rejected_during_erasing(self):
+		lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Someone"})
+		lead.flags.ignore_mandatory = True
+		lead.insert(ignore_permissions=True)
+		r = make_request(
+			status="Erasing",
+			logged_by="rep@example.com",
+			requester_names="Marisol Vega",
+			identifiers=[{"kind": "Email", "value": "marisol@x.net"}],
+		)
+		for values in (
+			{"requester_names": "Someone else"},
+			{"original_message": "Changed"},
+			{"contract_references": "Order 42"},
+			{"identifiers": [{"kind": "Email", "value": "marisol@x.net", "excluded": 1}]},
+			{
+				"matches": [
+					{
+						"reference_doctype": "CRM Lead",
+						"reference_name": lead.name,
+						"confirmed": 1,
+						"source": "Identifier match",
+					}
+				]
+			},
+		):
+			with self.assertRaises(frappe.PermissionError, msg=str(values)):
+				self.rest_save("comp1@example.com", r.name, **values)
+			frappe.set_user("Administrator")
+		self.assertEqual(
+			frappe.db.get_value("CRM Erasure Request", r.name, "requester_names"), "Marisol Vega"
+		)
+
+	def test_rest_content_edit_allowed_within_the_approval_rules(self):
+		r = make_request(logged_by="rep@example.com")
+		# The logger while Logged.
+		self.rest_save("rep@example.com", r.name, requester_names="Marisol Vega")
+		frappe.set_user("Administrator")
+		r.reload()
+		with system_write():
+			r.status = "Awaiting Sign-off"
+			r.save()
+		# Compliance until approval.
+		self.rest_save("comp1@example.com", r.name, contract_references="Order 42")
+		frappe.set_user("Administrator")
+		self.assertEqual(
+			frappe.db.get_value("CRM Erasure Request", r.name, ["requester_names", "contract_references"]),
+			("Marisol Vega", "Order 42"),
+		)
+		# The logger, once the request has left Logged: no longer, even past the permission
+		# check.
+		frappe.db.set_value("CRM Erasure Request", r.name, "status", "On Hold")
+		frappe.set_user("rep@example.com")
+		doc = frappe.get_doc("CRM Erasure Request", r.name)
+		doc.requester_names = "Changed"
+		self.assertRaises(frappe.PermissionError, doc.save, ignore_permissions=True)
+
+	def test_sales_manager_reads_but_never_writes(self):
+		r = make_request(logged_by="rep@example.com", status="Awaiting Sign-off")
+		self.assertTrue(has_permission(r, "read", "salesmanager@example.com"))
+		self.assertFalse(has_permission(r, "write", "salesmanager@example.com"))
+		self.assertTrue(has_permission(r, "write", "comp1@example.com"))
+		with self.assertRaises(frappe.PermissionError):
+			self.rest_save("salesmanager@example.com", r.name, original_message="Changed")
+
 	def test_visibility(self):
 		r = make_request(logged_by="rep@example.com")
 		self.assertTrue(has_permission(r, "read", "rep@example.com"))
@@ -253,7 +343,7 @@ class TestCRMErasureRequest(IntegrationTestCase):
 		# A later save by someone else keeps the original stamp.
 		frappe.set_user("comp2@example.com")
 		r = frappe.get_doc("CRM Erasure Request", r.name)
-		r.contract_references = "Order 42"
+		r.acknowledgment_sent = 1
 		r.save()
 		self.assertEqual(r.checklist[0].done_by, "comp1@example.com")
 
@@ -265,18 +355,19 @@ class TestCRMErasureRequest(IntegrationTestCase):
 	def test_only_compliance_changes_checklist(self):
 		r = make_request(status="Erased", checklist=[{"description": "Delete recordings"}])
 		frappe.set_user("salesmanager@example.com")
+		# Past the permission check (a code path that skips it): the checklist rule holds.
 		r = frappe.get_doc("CRM Erasure Request", r.name)
 		r.checklist[0].done = 1
-		self.assertRaises(frappe.PermissionError, r.save)
+		self.assertRaises(frappe.PermissionError, r.save, ignore_permissions=True)
 
 		r = frappe.get_doc("CRM Erasure Request", r.name)
 		r.append("checklist", {"description": "Another provider"})
-		self.assertRaises(frappe.PermissionError, r.save)
+		self.assertRaises(frappe.PermissionError, r.save, ignore_permissions=True)
 
 		# Saving without touching the checklist is fine.
 		r = frappe.get_doc("CRM Erasure Request", r.name)
-		r.contract_references = "Order 42"
-		r.save()
+		r.acknowledgment_sent = 1
+		r.save(ignore_permissions=True)
 
 	def test_erasure_job_may_append_checklist_row(self):
 		r = make_request(status="Erasing")

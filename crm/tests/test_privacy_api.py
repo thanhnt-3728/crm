@@ -25,7 +25,7 @@ from crm.api.erasure import (
 from crm.fcrm.doctype.crm_erasure_request.test_crm_erasure_request import USERS, make_request, make_user
 from crm.privacy import system_write
 from crm.privacy.erasure import placeholder_content
-from crm.privacy.setup import ensure_privacy_setup
+from crm.privacy.setup import DEFAULT_PERSONAL_FIELDS, ensure_privacy_setup
 from crm.tests.test_privacy_matching import OWNER, make_person
 from crm.tests.test_privacy_preview import make_communication
 
@@ -58,6 +58,8 @@ class TestPrivacyAPI(IntegrationTestCase):
 	def setUp(self):
 		frappe.db.savepoint(SAVEPOINT)
 		frappe.db.set_single_value("System Settings", "country", "United States")
+		# Settings saved by a test are rolled back; the cached copy must go too.
+		self.addCleanup(frappe.clear_document_cache, "CRM Privacy Settings", "CRM Privacy Settings")
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -291,6 +293,16 @@ class TestPrivacyAPI(IntegrationTestCase):
 			queue="long",
 			enqueue_after_commit=True,
 		)
+
+	def test_administrator_cannot_approve(self):
+		"""Administrator gets every role from `get_roles`, but holds no Compliance assignment
+		and never approves."""
+		request = self.awaiting()
+		with approval_job_queued() as enqueue:
+			self.assertRaises(frappe.PermissionError, approve, request.name, request.name)
+			self.assertRaises(frappe.PermissionError, preview, request.name)
+		enqueue.assert_not_called()
+		self.assertEqual(self.status_of(request), "Awaiting Sign-off")
 
 	def test_approve_bumps_modified(self):
 		request = self.awaiting()
@@ -552,26 +564,56 @@ class TestPrivacyAPI(IntegrationTestCase):
 		self.assertEqual(set(result), {"head_of_compliance", "contract_retention_months", "personal_fields"})
 		self.assertNotIn("hash_secret", str(result))
 
+	def default_fields(self):
+		return [
+			{"document_type": doctype, "fieldname": fieldname}
+			for doctype, fieldnames in DEFAULT_PERSONAL_FIELDS.items()
+			for fieldname in fieldnames
+		]
+
 	def test_save_privacy_settings_replaces_fields_and_keeps_secret(self):
 		secret = frappe.get_single("CRM Privacy Settings").get_password("hash_secret")
+		fields = [*self.default_fields(), {"document_type": "CRM Lead", "fieldname": "website"}]
 		frappe.set_user(COMPLIANCE)
 		saved = save_privacy_settings(
 			head_of_compliance=COMPLIANCE,
 			contract_retention_months=36,
-			personal_fields=[{"document_type": "CRM Lead", "fieldname": "email"}],
+			personal_fields=fields,
 		)
 		self.assertEqual(saved["head_of_compliance"], COMPLIANCE)
 		self.assertEqual(saved["contract_retention_months"], 36)
-		self.assertEqual(saved["personal_fields"], [{"document_type": "CRM Lead", "fieldname": "email"}])
+		self.assertEqual(saved["personal_fields"], fields)
 		frappe.set_user("Administrator")
 		self.assertEqual(frappe.get_single("CRM Privacy Settings").get_password("hash_secret"), secret)
+
+	def test_save_privacy_settings_without_fields_keeps_the_list(self):
+		before = get_privacy_settings()["personal_fields"]
+		frappe.set_user(COMPLIANCE)
+		saved = save_privacy_settings(head_of_compliance=COMPLIANCE, contract_retention_months=12)
+		self.assertEqual(saved["personal_fields"], before)
+		self.assertTrue(saved["personal_fields"])
+
+	def test_save_privacy_settings_refuses_removing_core_fields(self):
+		frappe.set_user(COMPLIANCE)
+		for removed in (("CRM Lead", "email"), ("Contact", "full_name"), ("CRM Contacts", "phone")):
+			fields = [
+				row for row in self.default_fields() if (row["document_type"], row["fieldname"]) != removed
+			]
+			with self.assertRaisesRegex(frappe.ValidationError, "can't be removed"):
+				save_privacy_settings(personal_fields=fields)
+		with self.assertRaisesRegex(frappe.ValidationError, "can't be removed"):
+			save_privacy_settings(personal_fields=[])
+		# Non-core default rows (gender, say) can go.
+		gender = {"document_type": "CRM Lead", "fieldname": "gender"}
+		saved = save_privacy_settings(personal_fields=[row for row in self.default_fields() if row != gender])
+		self.assertNotIn(gender, saved["personal_fields"])
 
 	def test_save_privacy_settings_rejects_a_field_that_does_not_exist(self):
 		frappe.set_user(COMPLIANCE)
 		self.assertRaises(
 			frappe.ValidationError,
 			save_privacy_settings,
-			personal_fields=[{"document_type": "CRM Lead", "fieldname": "emial"}],
+			personal_fields=[*self.default_fields(), {"document_type": "CRM Lead", "fieldname": "emial"}],
 		)
 
 	def test_save_privacy_settings_rejects_negative_retention(self):

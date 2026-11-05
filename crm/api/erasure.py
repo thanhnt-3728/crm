@@ -11,7 +11,7 @@ from frappe import _
 from frappe.utils import add_months, cint, getdate, now_datetime, today
 
 from crm.fcrm.doctype.crm_erasure_request.crm_erasure_request import FULL_ACCESS_ROLES
-from crm.privacy import system_write
+from crm.privacy import has_compliance_role, system_write
 from crm.privacy.deadlines import day_number, days_left
 from crm.privacy.erasure import placeholder_content
 from crm.privacy.identifiers import normalize
@@ -64,7 +64,8 @@ def _roles() -> set[str]:
 
 
 def _is_compliance() -> bool:
-	return "Compliance" in _roles()
+	# The role assignment itself: Administrator gets every role from `get_roles`.
+	return has_compliance_role(frappe.session.user)
 
 
 def _has_full_access() -> bool:
@@ -537,8 +538,9 @@ def save_privacy_settings(
 	personal_fields: list[dict] | None = None,
 ) -> dict:
 	"""Save the Head of Compliance, the contract retention period and the personal fields.
-	Each field must exist on its document type. Only people who may write the settings can
-	do this; the stored hash secret is left as it is."""
+	Each field must exist on its document type, and the core identifying fields can't be
+	taken off; `personal_fields=None` leaves the list as it is. Only people who may write the
+	settings can do this; the stored hash secret is left as it is."""
 	doc = _settings_doc("write")
 	months = cint(contract_retention_months)
 	if months < 0:
@@ -546,11 +548,17 @@ def save_privacy_settings(
 
 	doc.head_of_compliance = head_of_compliance or None
 	doc.contract_retention_months = months
-	doc.set("personal_fields", [])
-	for row in personal_fields or []:
-		doc.append(
-			"personal_fields",
-			{"document_type": row.get("document_type"), "fieldname": (row.get("fieldname") or "").strip()},
-		)
+	# Not given: the list stays as it is. Given, it replaces the list; the settings refuse
+	# a list without the core identifying fields.
+	if personal_fields is not None:
+		doc.set("personal_fields", [])
+		for row in personal_fields:
+			doc.append(
+				"personal_fields",
+				{
+					"document_type": row.get("document_type"),
+					"fieldname": (row.get("fieldname") or "").strip(),
+				},
+			)
 	doc.save()
 	return get_privacy_settings()

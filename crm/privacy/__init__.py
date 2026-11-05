@@ -13,6 +13,15 @@ def personal_fields(doctype: str) -> set[str]:
 	return {row.fieldname for row in settings().personal_fields if row.document_type == doctype}
 
 
+def has_compliance_role(user: str | None = None) -> bool:
+	"""Whether `user` (default: the session user) is assigned the Compliance role.
+
+	Reads the role assignment itself: `frappe.get_roles("Administrator")` returns every
+	role, and the Administrator must not pass as Compliance through that."""
+	user = user or frappe.session.user
+	return bool(frappe.db.exists("Has Role", {"parenttype": "User", "parent": user, "role": "Compliance"}))
+
+
 def compliance_users() -> list[str]:
 	"""Enabled users who hold the Compliance role."""
 	holders = frappe.get_all(
