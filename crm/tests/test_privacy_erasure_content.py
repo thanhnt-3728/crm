@@ -568,6 +568,31 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 			frappe.db.get_value("CRM Notification", other.name, "message"), "Bob signed the quote"
 		)
 
+	def test_global_search_entries_updated_after_commit(self):
+		"""Frappe's global search drops the entry under her contact's old name and is fed
+		the anonymized records again, once the erasure is committed."""
+		old_contact = self.contact.name
+		frappe.db.sql(
+			"""insert into `__global_search` (doctype, name, title, content)
+			values ('Contact', %s, 'Marisol', 'Marisol ||| marisol@x.net')""",
+			old_contact,
+		)
+		with (
+			patch("frappe.utils.global_search.update_global_search") as update,
+			patch(
+				"frappe.utils.global_search.get_doctypes_with_global_search",
+				return_value=["Contact", "CRM Lead", "Communication"],
+			),
+		):
+			self.run_job()
+		left = frappe.db.sql(
+			"select count(*) from `__global_search` where doctype = 'Contact' and name = %s", old_contact
+		)[0][0]
+		self.assertEqual(left, 0)
+		resynced = {(doc.doctype, doc.name) for (doc,), _kwargs in update.call_args_list}
+		self.assertIn(("Contact", self.person), resynced)
+		self.assertIn(("CRM Lead", self.lead.name), resynced)
+
 	def test_email_queue_to_her_deleted(self):
 		def queue(recipient):
 			return frappe.get_doc(
@@ -585,7 +610,7 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("Deleted Document", {"deleted_name": hers.name}))
 		self.assertTrue(frappe.db.exists("Email Queue", bobs.name))
 
-	def test_event_participant_email_replaced(self):
+	def test_event_participant_row_deleted(self):
 		event = frappe.get_doc(
 			{
 				"doctype": "Event",
@@ -609,7 +634,9 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 		emails = frappe.get_all(
 			"Event Participants", filters={"parent": event.name}, pluck="email", parent_doctype="Event"
 		)
-		self.assertEqual(sorted(emails), sorted([self.person, BOB_EMAIL]))
+		# Her row is gone (a placeholder there would be mailed as an address); Bob's stays.
+		self.assertEqual(emails, [BOB_EMAIL])
+		self.assertTrue(frappe.db.exists("Event", event.name))
 
 	def test_failed_lead_sync_log_wiped(self):
 		if not frappe.db.table_exists("Failed Lead Sync Log"):

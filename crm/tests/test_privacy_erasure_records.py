@@ -680,3 +680,27 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 			frappe.db.get_value("CRM Deal", deal.name, ["first_name", "last_name", "email"]),
 			("Rosa", "Vega", BOB_EMAIL),
 		)
+
+	# -- custom fields in deal history -----------------------------------------------------
+
+	def test_deal_version_matcher_reads_custom_email_field_from_meta(self):
+		"""A custom field holding an email (options Email) is compared as an email in deal
+		history, not as a name."""
+		from crm.privacy.erasure import _DealVersionMatcher, _Person
+
+		class Meta:
+			def get_field(self, fieldname):
+				if fieldname == "personal_email":
+					return frappe._dict(fieldname=fieldname, fieldtype="Data", options="Email")
+				return None
+
+		person = _Person(emails={EMAIL}, names={"Marisol"}, full_names={"marisol"})
+		data = {"changed": [["personal_email", "Marisol@X.net", BOB_EMAIL]]}
+		with_meta = _DealVersionMatcher(person, set(), set(), meta=Meta())
+		out = scrub_version_data(data, {"personal_email"}, "P", matcher=with_meta)
+		self.assertEqual(out["changed"], [["personal_email", "P", BOB_EMAIL]])
+
+		# Without the meta the field reads as a name, and her address would survive.
+		without_meta = _DealVersionMatcher(person, set(), set())
+		out = scrub_version_data(data, {"personal_email"}, "P", matcher=without_meta)
+		self.assertEqual(out["changed"], [["personal_email", "Marisol@X.net", BOB_EMAIL]])

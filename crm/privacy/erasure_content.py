@@ -35,7 +35,13 @@ from crm.privacy.erasure import (
 	placeholder_person,
 	scrub_version_data,
 )
-from crm.privacy.identifiers import extract_emails, normalize_email, text_contains_email, text_contains_phone
+from crm.privacy.identifiers import (
+	email_pattern,
+	extract_emails,
+	normalize_email,
+	text_contains_email,
+	text_contains_phone,
+)
 from crm.privacy.matching import _wildcard_digits
 from crm.utils import normalize_phone
 
@@ -149,8 +155,7 @@ def replace_person_text(text: str | None, emails, phones, names, person: str, co
 		return text
 	out = text
 	for email in sorted(emails, key=len, reverse=True):
-		pattern = rf"(?<![\w.%+-]){re.escape(email)}(?![\w-]|\.[\w-])"
-		out = re.sub(pattern, lambda _match: person, out, flags=re.IGNORECASE)
+		out = re.sub(email_pattern(email), lambda _match: person, out, flags=re.IGNORECASE)
 	for country_code, digits in phones:
 		if not digits or digits not in _digits(out):
 			continue
@@ -221,6 +226,8 @@ class _ContentEraser:
 		# old names of her renamed contacts once `erase_content` knows them.
 		self.text_names = self.who.full_names
 		self.reindex: set[tuple[str, str]] = set()
+		# (doctype, name) entries to drop from Frappe's global search: records renamed away.
+		self.unindex: set[tuple[str, str]] = set()
 		self.deleted_files: list[dict] = []
 
 	def replace(self, text, names=True):
@@ -349,14 +356,18 @@ class _ContentEraser:
 	def todos(self, erased: dict) -> None:
 		"""Assignments on the erased records describe them (often by the person's name)."""
 		for doctype, names in erased.items():
-			if names:
+			if not names:
+				continue
+			todos = frappe.get_all(
+				"ToDo",
+				filters={"reference_type": doctype, "reference_name": ["in", list(names)]},
+				pluck="name",
+			)
+			if todos:
 				frappe.db.set_value(
-					"ToDo",
-					{"reference_type": doctype, "reference_name": ["in", list(names)]},
-					"description",
-					self.content,
-					update_modified=False,
+					"ToDo", {"name": ["in", todos]}, "description", self.content, update_modified=False
 				)
+				self.reindex.update(("ToDo", name) for name in todos)
 
 	def comment_caches(self, erased: dict) -> None:
 		"""A record's `_comments` keeps the text of its latest comments for list views."""
@@ -493,14 +504,12 @@ class _ContentEraser:
 				frappe.delete_doc("Email Queue", name, delete_permanently=True, ignore_permissions=True)
 
 	def event_participants(self) -> None:
+		"""The person's participant rows are deleted. A placeholder in `email` would be
+		treated as an address when the event's reminders go out to the other participants."""
 		if not self.who.emails or not frappe.db.has_column("Event Participants", "email"):
 			return
 		table = frappe.qb.DocType("Event Participants")
-		(
-			frappe.qb.update(table)
-			.set(table.email, self.person)
-			.where(_lower_trim(table.email).isin(sorted(self.who.emails)))
-		).run()
+		(frappe.qb.from_(table).delete().where(_lower_trim(table.email).isin(sorted(self.who.emails)))).run()
 
 	def lead_sync_logs(self) -> None:
 		"""Failed Facebook lead syncs keep the lead's data as JSON."""
@@ -603,8 +612,16 @@ class _ContentEraser:
 			.run(as_dict=True)
 		)
 		contacts = set(targets.contacts) | {old for old, new in renames.items() if new in targets.contacts}
-		tied = _DealVersionMatcher(self.who.person, contacts, set())
-		untied = _DealVersionMatcher(self.who.person, contacts, set(), names=False)
+		matchers = {}
+
+		def matcher(doctype: str, names: bool):
+			# One per doctype: its meta tells custom email and phone fields apart.
+			if (doctype, names) not in matchers:
+				matchers[doctype, names] = _DealVersionMatcher(
+					self.who.person, contacts, set(), names=names, meta=frappe.get_meta(doctype)
+				)
+			return matchers[doctype, names]
+
 		for version in versions:
 			if version.docname in erased[version.ref_doctype]:
 				continue  # scrubbed with the record
@@ -615,16 +632,16 @@ class _ContentEraser:
 				self.person,
 				_version_tables(version.ref_doctype),
 				renames,
-				tied if is_tied else untied,
+				matcher(version.ref_doctype, names=is_tied),
 			)
 
 	# -- After commit --------------------------------------------------------------------
 
 	def after_commit(self) -> None:
-		files, pairs = list(self.deleted_files), sorted(self.reindex)
-		self.deleted_files, self.reindex = [], set()
-		if files or pairs:
-			work = _AfterCommitWork(files, pairs)
+		files, pairs, gone = list(self.deleted_files), sorted(self.reindex), sorted(self.unindex)
+		self.deleted_files, self.reindex, self.unindex = [], set(), set()
+		if files or pairs or gone:
+			work = _AfterCommitWork(files, pairs, gone)
 			frappe.db.after_commit.add(work)
 			tracked = frappe.flags.privacy_after_commit_work
 			if isinstance(tracked, list):
@@ -638,9 +655,10 @@ class _AfterCommitWork:
 	"""What waits for the commit: removing deleted files from disk and re-indexing. Runs
 	once; does nothing once cancelled (the erasure was rolled back); never raises."""
 
-	def __init__(self, files: list[dict], pairs: list[tuple[str, str]]):
+	def __init__(self, files: list[dict], pairs: list[tuple[str, str]], gone=()):
 		self.files = files
 		self.pairs = pairs
+		self.gone = list(gone)
 		self.state = "pending"
 
 	def __call__(self) -> None:
@@ -652,6 +670,13 @@ class _AfterCommitWork:
 			_reindex(self.pairs)
 		except Exception:
 			frappe.log_error(title="Erasure: re-indexing failed")
+		try:
+			resync_global_search(self.pairs, self.gone)
+		except Exception:
+			frappe.log_error(
+				title="Erasure: global search update failed",
+				message="Could not update Frappe's global search after an erasure.",
+			)
 
 	def cancel(self) -> None:
 		if self.state == "pending":
@@ -720,6 +745,36 @@ def _reindex(pairs) -> None:
 			search.index_doc(doctype, name)  # logs its own errors
 
 
+def resync_global_search(pairs, gone=()) -> None:
+	"""Frappe's global search (`__global_search`) for the changed records: entries under
+	the `gone` (doctype, old name) pairs are deleted, and each of `pairs` is deleted and
+	added again from the record as it is now. The erasure writes with `db.set_value` and
+	renames with `rebuild_search=False`, neither of which updates it."""
+	from frappe.utils.global_search import (
+		delete_for_document,
+		get_doctypes_with_global_search,
+		update_global_search,
+	)
+
+	for doctype, name in gone:
+		delete_for_document(frappe._dict(doctype=doctype, name=name))
+
+	searched = set(get_doctypes_with_global_search())
+	for doctype, name in pairs:
+		if doctype not in searched:
+			continue
+		try:
+			delete_for_document(frappe._dict(doctype=doctype, name=name))
+			if frappe.db.exists(doctype, name):
+				update_global_search(frappe.get_doc(doctype, name))
+		except Exception:
+			# Fixed message: one record must not stop the rest.
+			frappe.log_error(
+				title="Erasure: global search update failed",
+				message=f"Could not update global search for {doctype} {name}.",
+			)
+
+
 # -- Entry points ----------------------------------------------------------------------------
 
 
@@ -779,5 +834,13 @@ def erase_content(request, targets, person_values: set[str]) -> None:
 
 	eraser.reindex.update(("CRM Lead", name) for name in targets.leads)
 	eraser.reindex.update(("CRM Deal", name) for name in targets.deals_still_on)
+	eraser.reindex.update(("CRM Deal", name) for name in targets.deals_removed_from)
 	eraser.reindex.update(("Contact", name) for name in targets.contacts)
+	eraser.reindex.update(("Address", name) for name in targets.addresses)
+	# Frappe's global search keeps entries under the old contact and address names.
+	for old, new in (targets.renames or {}).items():
+		if new in targets.contacts:
+			eraser.unindex.add(("Contact", old))
+		elif new in targets.addresses:
+			eraser.unindex.add(("Address", old))
 	eraser.after_commit()

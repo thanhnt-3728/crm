@@ -77,6 +77,16 @@ class TestPrivacyIdentifiers(IntegrationTestCase):
 		self.assertFalse(text_contains_email("", "marisol.vega@x.net"))
 		self.assertFalse(text_contains_email("anything", ""))
 
+	def test_text_contains_email_needs_whole_address(self):
+		# Inside a longer address: someone else's.
+		self.assertFalse(text_contains_email("Mail anna.marisol@x.net today", "marisol@x.net"))
+		self.assertFalse(text_contains_email("anna+marisol@x.net", "marisol@x.net"))
+		self.assertFalse(text_contains_email("marisol@x.net.au", "marisol@x.net"))
+		# The exact address, in JSON or at the end of a sentence.
+		self.assertTrue(text_contains_email('{"email":"MARISOL@x.net"}', "marisol@x.net"))
+		self.assertTrue(text_contains_email("Write to marisol@x.net.", "marisol@x.net"))
+		self.assertTrue(text_contains_email("<marisol@x.net>", "marisol@x.net"))
+
 	def test_text_contains_phone(self):
 		self.assertTrue(text_contains_phone('{"mobile_no": "(916) 555-0100"}', "+19165550100"))
 		self.assertTrue(text_contains_phone("call 916.555.0100 today", "916-555-0100"))

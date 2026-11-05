@@ -467,16 +467,20 @@ class _DealVersionMatcher:
 
 	With `names` off, a value counts as hers only when it is her email or phone: for
 	records not tied to her, where a name equal to one of hers may well be a namesake's.
-	Her table rows are still told apart by their contact, email or phone."""
+	Her table rows are still told apart by their contact, email or phone.
 
-	def __init__(self, person: _Person, contacts: set[str], rows: set[str], names: bool = True):
+	`meta` is the meta of the record's doctype: a custom email or phone field is compared as
+	an email or phone, not as a name."""
+
+	def __init__(self, person: _Person, contacts: set[str], rows: set[str], names: bool = True, meta=None):
 		self.person = person
 		self.contacts = contacts  # the person's contact names, old and new
 		self.rows = rows  # names of the person's contacts rows on the deal
 		self.names = names
+		self.meta = meta
 
 	def value(self, fieldname: str, value) -> bool:
-		kind = _kind_of(fieldname)
+		kind = _kind_of(fieldname, self.meta.get_field(fieldname) if self.meta else None)
 		if kind == "Text" and not self.names:
 			return False
 		return _value_is_persons(kind, value, self.person)
@@ -700,10 +704,11 @@ def erase_records(request, targets) -> None:
 	_retitle_contact_links(targets.contacts, placeholder)
 
 	all_contacts = old_contacts | set(targets.contacts)
+	deal_meta = frappe.get_meta("CRM Deal")
 
 	def deal_matcher(deal):
 		# Deals are shared with other contacts: only the person's data goes.
-		return _DealVersionMatcher(person, all_contacts, her_rows.get(deal, set()))
+		return _DealVersionMatcher(person, all_contacts, her_rows.get(deal, set()), meta=deal_meta)
 
 	for doctype, names, matcher_for in (
 		("CRM Lead", targets.leads, None),

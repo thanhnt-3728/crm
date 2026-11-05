@@ -78,12 +78,20 @@ def extract_emails(header: str | None) -> list[str]:
 	return emails
 
 
+def email_pattern(email: str) -> str:
+	"""Regex for the normalized `email` as a whole address inside text: not preceded or
+	followed by a character that could be part of an address (`anna.marisol@x.net` does not
+	contain `marisol@x.net`). A trailing full stop ends a sentence, not the address. Use
+	with re.IGNORECASE."""
+	return rf"(?<![\w.%+-]){re.escape(email)}(?![\w%+-]|\.[\w-])"
+
+
 def text_contains_email(text: str | None, email: str | None) -> bool:
-	"""Whether `text` contains the email address, ignoring case."""
+	"""Whether `text` contains the email address as a whole address, ignoring case."""
 	target = normalize_email(email)
 	if not text or not target:
 		return False
-	return target in text.lower()
+	return re.search(email_pattern(target), text, flags=re.IGNORECASE) is not None
 
 
 def text_contains_phone(text: str | None, phone: str | None) -> bool:
