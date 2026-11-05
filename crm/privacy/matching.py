@@ -347,7 +347,8 @@ def submit_request(request_name: str) -> str:
 	"""Hand a logged request to Compliance. Needs at least one confirmed match. The request
 	goes On Hold, and each open deal's owner is asked to act, when a confirmed contact is on
 	an open deal; otherwise it awaits sign-off. Returns the new status."""
-	request = frappe.get_doc(REQUEST, request_name)
+	# Locked and current: the status check and the save below must not work from a stale copy.
+	request = frappe.get_doc(REQUEST, request_name, for_update=True)
 	request.check_permission("write")
 
 	if request.status != "Logged":

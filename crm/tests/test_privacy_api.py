@@ -20,6 +20,7 @@ from crm.api.erasure import (
 	update_matches,
 )
 from crm.fcrm.doctype.crm_erasure_request.test_crm_erasure_request import USERS, make_request, make_user
+from crm.privacy import system_write
 from crm.privacy.erasure import placeholder_content
 from crm.privacy.setup import ensure_privacy_setup
 from crm.tests.test_privacy_matching import OWNER, make_person
@@ -287,6 +288,30 @@ class TestPrivacyAPI(IntegrationTestCase):
 			queue="long",
 			enqueue_after_commit=True,
 		)
+
+	def test_approve_bumps_modified(self):
+		request = self.awaiting()
+		before = frappe.db.get_value(REQUEST, request.name, ["modified", "modified_by"], as_dict=True)
+		frappe.set_user(COMPLIANCE)
+		with approval_job_queued():
+			approve(request.name, request.name)
+		after = frappe.db.get_value(REQUEST, request.name, ["modified", "modified_by"], as_dict=True)
+		self.assertNotEqual(after.modified, before.modified)
+		self.assertEqual(after.modified_by, COMPLIANCE)
+
+	def test_stale_copy_cannot_undo_an_approval(self):
+		"""A copy loaded before the approval can neither be saved over it nor edit matches."""
+		request = self.awaiting()
+		stale = frappe.get_doc(REQUEST, request.name)
+		frappe.set_user(COMPLIANCE)
+		with approval_job_queued():
+			approve(request.name, request.name)
+
+		with self.assertRaises(frappe.TimestampMismatchError), system_write():
+			stale.save(ignore_permissions=True)
+		self.assertRaises(frappe.PermissionError, update_matches, request.name, [], [])
+		self.assertRaises(frappe.PermissionError, submit, request.name)
+		self.assertEqual(self.status_of(request), "Erasing")
 
 	def test_double_approve_second_fails(self):
 		request = self.awaiting()

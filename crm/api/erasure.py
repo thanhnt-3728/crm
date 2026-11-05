@@ -89,13 +89,12 @@ def _require_can_edit_matches(request) -> None:
 	frappe.throw(_("You cannot change this request."), frappe.PermissionError)
 
 
-def _lock_status(name: str) -> str:
-	"""The request's status, read under a row lock: whoever changes it next waits for this
-	transaction, so two approvals (or an approval and a decline) cannot both go through."""
-	status = frappe.db.get_value(REQUEST, name, "status", for_update=True)
-	if status is None:
-		frappe.throw(_("Erasure request {0} not found.").format(name), frappe.DoesNotExistError)
-	return status
+def _locked_request(name: str):
+	"""The request, read under a row lock and so as it is now, not as an older snapshot of
+	this transaction had it. Whoever changes the request next waits for this transaction, so
+	two approvals (or an approval and a decline, or a match edit) cannot both go through.
+	Every endpoint that changes a request starts here, before it looks at the status."""
+	return frappe.get_doc(REQUEST, name, for_update=True)
 
 
 def _save_as_system(request, **kwargs) -> None:
@@ -307,7 +306,7 @@ def _apply_identifiers(request, identifiers: list[dict]) -> None:
 def update_matches(name: str, matches: list[dict], identifiers: list[dict]) -> None:
 	"""Replace the matched records and identifiers. The logger may while the request is
 	`Logged`, Compliance until it is approved. Match counts are recounted."""
-	request = frappe.get_doc(REQUEST, name)
+	request = _locked_request(name)
 	_require_can_edit_matches(request)
 
 	_apply_matches(request, matches)
@@ -319,8 +318,7 @@ def update_matches(name: str, matches: list[dict], identifiers: list[dict]) -> N
 @frappe.whitelist()
 def submit(name: str) -> str:
 	"""Hand the request to Compliance. Returns the new status."""
-	request = frappe.get_doc(REQUEST, name)
-	_require_can_edit_matches(request)
+	_require_can_edit_matches(_locked_request(name))
 	return submit_request(name)
 
 
@@ -347,25 +345,25 @@ def _hold(request, deals: list[str]) -> None:
 def approve(name: str, typed_name: str) -> None:
 	"""Approve the request and start the erasure job. The approver must be Compliance and
 	not the logger, and type the request number. Only one approval can ever succeed."""
-	request = frappe.get_doc(REQUEST, name)
 	user = frappe.session.user
+	not_allowed = _("Only a Compliance user who did not log this request can approve it.")
 
+	if not _is_compliance():
+		frappe.throw(not_allowed, frappe.PermissionError)
+	request = _locked_request(name)
 	if not request.can_approve(user):
-		frappe.throw(
-			_("Only a Compliance user who did not log this request can approve it."),
-			frappe.PermissionError,
-		)
+		frappe.throw(not_allowed, frappe.PermissionError)
 	if (typed_name or "").strip() != name:
 		frappe.throw(_("Type the request number exactly to confirm."))
 
-	status = _lock_status(name)
-	if status != AWAITING:
-		if status in (ERASING, "Erased", "Closed"):
+	if request.status != AWAITING:
+		if request.status in (ERASING, "Erased", "Closed"):
 			frappe.throw(_("Request {0} is already approved.").format(name))
-		frappe.throw(_("Only a request awaiting sign-off can be approved. This one is {0}.").format(status))
+		frappe.throw(
+			_("Only a request awaiting sign-off can be approved. This one is {0}.").format(request.status)
+		)
 
 	# A person may have been put on an open deal since the request was submitted.
-	request.reload()
 	deals = open_deals_with_person(request)
 	if deals:
 		_hold(request, deals)
@@ -377,6 +375,9 @@ def approve(name: str, typed_name: str) -> None:
 		.set(table.status, ERASING)
 		.set(table.approved_by, user)
 		.set(table.approved_on, now_datetime())
+		# A save of an older copy of the request must fail the timestamp check, not undo this.
+		.set(table.modified, now_datetime())
+		.set(table.modified_by, user)
 		.where(table.name == name)
 		.where(table.status == AWAITING)
 	).run()
@@ -396,17 +397,15 @@ def approve(name: str, typed_name: str) -> None:
 def decline(name: str, reason: str) -> None:
 	"""Decline the request, with a written reason. Compliance only, and not the logger."""
 	_require_compliance()
-	request = frappe.get_doc(REQUEST, name)
+	request = _locked_request(name)
 	if _is_logger(request):
 		frappe.throw(_("You cannot decline a request you logged."), frappe.PermissionError)
 	if not (reason or "").strip():
 		frappe.throw(_("A reason is required to decline a request."))
 
-	status = _lock_status(name)
-	if status not in DECLINABLE:
-		frappe.throw(_("A request that is {0} cannot be declined.").format(status))
+	if request.status not in DECLINABLE:
+		frappe.throw(_("A request that is {0} cannot be declined.").format(request.status))
 
-	request.reload()
 	request.status = "Declined"
 	request.denial_reason = reason.strip()
 	_save_as_system(request)
@@ -470,10 +469,9 @@ def close(name: str, answered_on: str, outcome: str, denial_reason: str = "") ->
 	from crm.privacy.erasure import erase_communications
 
 	_require_compliance()
-	request = frappe.get_doc(REQUEST, name)
-	if _lock_status(name) not in CLOSABLE:
+	request = _locked_request(name)
+	if request.status not in CLOSABLE:
 		frappe.throw(_("Only an erased or declined request can be closed."))
-	request.reload()
 
 	if not answered_on:
 		frappe.throw(_("Date answered is required to close a request."))
