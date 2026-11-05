@@ -65,12 +65,13 @@ NULL_TYPES = {
 	"Duration",
 }
 
-# Deal fields compared only together with the deal's other personal fields.
-GENERIC_TYPES = ("Link", "Select", "Check")
-
-# A deal field's value is the person's when it equals one of these fields on the person's
-# confirmed leads or contacts (default: the field of the same name).
-SAME_VALUE_FIELDS = {"job_title": ("job_title", "designation")}
+# Deal fields that identify the person when they equal the person's value: a full name, or
+# a social profile equal to the same field on the person's confirmed leads/contacts. Email
+# and phone fields identify too. Every other personal field on a deal (first or last name
+# alone, job title, gender, salutation) could just as well be another person's, so it is
+# blanked only once the deal is shown to be about the person.
+FULL_NAME_FIELDS = ("lead_name",)
+PROFILE_FIELDS = ("linkedin", "twitter", "facebook")
 
 # A phone whose national number is shorter than this matches too much free text.
 MIN_PHONE_DIGITS = 7
@@ -98,6 +99,7 @@ class _Person:
 	emails: set[str] = field(default_factory=set)  # normalized
 	phones: set[str] = field(default_factory=set)  # normalized E.164
 	names: set[str] = field(default_factory=set)  # as typed, stripped
+	full_names: set[str] = field(default_factory=set)  # casefolded
 	# Other personal values on the confirmed leads/contacts, casefolded, by fieldname.
 	values: dict[str, set[str]] = field(default_factory=dict)
 
@@ -124,6 +126,27 @@ def _person_names(request, records: list[dict]) -> set[str]:
 	return {name for name in names if len(name) > 1 and not name.startswith("Erased person ")}
 
 
+def _full_names(request, records: list[dict]) -> set[str]:
+	"""The person's full names, casefolded: lead/full names, first + last name on the
+	confirmed records, and each requester name."""
+	names = set()
+	for record in records:
+		names.add(record.get("lead_name") or "")
+		names.add(record.get("full_name") or "")
+		names.add(_join_name(record.get("first_name"), record.get("middle_name"), record.get("last_name")))
+		names.add(_join_name(record.get("first_name"), record.get("last_name")))
+	names.update(NAME_SEPARATORS.split(request.requester_names or ""))
+	return {
+		name.strip().casefold()
+		for name in names
+		if len(name.strip()) > 1 and not name.strip().startswith("Erased person ")
+	}
+
+
+def _join_name(*parts) -> str:
+	return " ".join(part.strip() for part in parts if part and part.strip())
+
+
 def _confirmed_records(request) -> list[dict]:
 	"""The current values of the confirmed leads and contacts."""
 	records = []
@@ -143,6 +166,7 @@ def _read_person(request) -> _Person:
 		emails=set(active_identifiers(request, "Email")),
 		phones=set(active_identifiers(request, "Phone")),
 		names=_person_names(request, records),
+		full_names=_full_names(request, records),
 	)
 
 	# Emails and phones on the confirmed records are the person's too, unless Compliance
@@ -218,86 +242,115 @@ def _erase_contact(name: str, placeholder: str) -> None:
 	frappe.db.delete("Contact Phone", {"parent": name, "parenttype": "Contact"})
 
 
-def _kind_of(df) -> str:
-	"""How a deal field is compared with the person's values: Email, Phone or Text."""
-	if df.options == "Email" or df.fieldname in ("email", "email_id"):
+def _kind_of(fieldname: str, df=None) -> str:
+	"""How a field is compared with the person's values: Email, Phone or Text."""
+	if fieldname in ("email", "email_id") or (df and df.options == "Email"):
 		return "Email"
-	if df.fieldtype == "Phone" or df.options == "Phone" or df.fieldname in ("mobile_no", "phone"):
+	if fieldname in ("mobile_no", "phone") or (df and (df.fieldtype == "Phone" or df.options == "Phone")):
 		return "Phone"
 	return "Text"
 
 
-def _holds_person_value(df, value, person: _Person) -> bool:
-	if not isinstance(value, str) or not value.strip():
-		return False
-	kind = _kind_of(df)
-	if kind == "Email":
-		return normalize_email(value) in person.emails
-	if kind == "Phone":
-		return normalize_phone(value) in person.phones
-	text = value.strip().casefold()
-	if text in person.folded_names():
-		return True
-	return any(
-		text in person.values.get(f, set()) for f in SAME_VALUE_FIELDS.get(df.fieldname, (df.fieldname,))
-	)
-
-
 def _is_person_row(row, contacts: set[str], person: _Person) -> bool:
-	if row.contact and row.contact in contacts:
+	if row.get("contact") and row.get("contact") in contacts:
 		return True
-	return normalize_email(row.email) in person.emails or bool(
-		{normalize_phone(row.mobile_no), normalize_phone(row.phone)} & person.phones
+	return normalize_email(row.get("email")) in person.emails or bool(
+		{normalize_phone(row.get("mobile_no")), normalize_phone(row.get("phone"))} & person.phones
 	)
 
 
-def _erase_deal(name: str, contacts: set[str], person: _Person, placeholder: str) -> None:
-	"""Anonymize the person's contacts rows on the deal, and blank the deal's own personal
-	fields that hold the person's values. Values copied from another (primary) contact stay."""
+def _deal_identifies_person(current: dict, person: _Person) -> bool:
+	"""Whether the deal's own fields carry the person's full name or social profile."""
+	for fieldname in FULL_NAME_FIELDS:
+		if (current.get(fieldname) or "").strip().casefold() in person.full_names - {""}:
+			return True
+	if _join_name(current.get("first_name"), current.get("last_name")).casefold() in person.full_names - {""}:
+		return True
+	for fieldname in PROFILE_FIELDS:
+		value = (current.get(fieldname) or "").strip().casefold()
+		if value and value in person.values.get(fieldname, set()):
+			return True
+	return False
+
+
+def _erase_deal(name: str, contacts: set[str], person: _Person, placeholder: str) -> set[str]:
+	"""Anonymize the person's contacts rows on the deal and blank the deal's own personal
+	fields that are the person's. Returns the names of the person's contacts rows.
+
+	A deal's email and phones are copied from its primary contact, so each is blanked only
+	when it holds the person's value. The deal's other personal fields (names, job title,
+	gender, social profiles...) are blanked only when the deal is about the person: the
+	person is its primary contact, or its email, phone, full name or social profile is the
+	person's. Otherwise they may belong to someone else and are left alone."""
 	row_values = _blanked_values("CRM Contacts", personal_fields("CRM Contacts"))
 	if frappe.get_meta("CRM Contacts").has_field("full_name"):
 		row_values["full_name"] = placeholder
 	rows = frappe.get_all(
 		"CRM Contacts",
 		filters={"parent": name, "parenttype": "CRM Deal"},
-		fields=["name", "contact", "email", "mobile_no", "phone"],
+		fields=["name", "contact", "email", "mobile_no", "phone", "is_primary"],
 		parent_doctype="CRM Deal",
 	)
-	for row in rows:
-		if row_values and _is_person_row(row, contacts, person):
+	hers = [row for row in rows if _is_person_row(row, contacts, person)]
+	for row in hers:
+		if row_values:
 			frappe.db.set_value("CRM Contacts", row.name, row_values, update_modified=False)
 
 	meta = frappe.get_meta("CRM Deal")
 	fields = [f for f in personal_fields("CRM Deal") if meta.has_field(f)]
 	if not fields:
-		return
+		return {row.name for row in hers}
 	current = frappe.db.get_value("CRM Deal", name, fields, as_dict=True) or {}
-	# Generic values such as gender or salutation say nothing on their own and may well be
-	# another person's: they are blanked only when the deal carries the person's details.
-	generic = {f for f in fields if meta.get_field(f).fieldtype in GENERIC_TYPES}
+
+	contact_fields = {f for f in fields if _kind_of(f, meta.get_field(f)) != "Text"}
 	matched = {
 		f
-		for f in fields
-		if f not in generic and _holds_person_value(meta.get_field(f), current.get(f), person)
+		for f in contact_fields
+		if isinstance(current.get(f), str)
+		and _value_is_persons(_kind_of(f, meta.get_field(f)), current.get(f), person)
 	}
-	if matched:
-		matched |= {f for f in generic if current.get(f) not in (None, "")}
+	if matched or any(row.is_primary for row in hers) or _deal_identifies_person(current, person):
+		matched |= {f for f in fields if f not in contact_fields and current.get(f) not in (None, "", 0)}
+
 	values = {f: _blank(meta.get_field(f).fieldtype) for f in matched}
 	if values:
 		frappe.db.set_value("CRM Deal", name, values, update_modified=False)
+	return {row.name for row in hers}
+
+
+def _value_is_persons(kind: str, value, person: _Person) -> bool:
+	"""Whether a single value is the person's email, phone or one of the person's names."""
+	if not isinstance(value, str) or not value.strip():
+		return False
+	if kind == "Email":
+		return normalize_email(value) in person.emails
+	if kind == "Phone":
+		return normalize_phone(value) in person.phones
+	return value.strip().casefold() in person.folded_names()
 
 
 # -- Change history ----------------------------------------------------------------------
 
 
-def _scrub_changes(changes, fields: set[str], placeholder: str) -> list:
-	"""[[fieldname, old, new], ...] with the old and new values of `fields` replaced. Empty
-	values stay empty."""
+def _scrub_value(fieldname: str, value, placeholder: str, is_hers=None):
+	if not value or (is_hers is not None and not is_hers(fieldname, value)):
+		return value
+	return placeholder
+
+
+def _scrub_changes(changes, fields: set[str], placeholder: str, is_hers=None) -> list:
+	"""[[fieldname, old, new], ...] with the old and new values of `fields` replaced: all of
+	them, or with `is_hers(fieldname, value)` only those it accepts. Empty values stay
+	empty."""
 	scrubbed = []
 	for change in changes or []:
 		if isinstance(change, list | tuple) and len(change) == 3 and change[0] in fields:
 			fieldname, old, new = change
-			change = [fieldname, placeholder if old else old, placeholder if new else new]
+			change = [
+				fieldname,
+				_scrub_value(fieldname, old, placeholder, is_hers),
+				_scrub_value(fieldname, new, placeholder, is_hers),
+			]
 		scrubbed.append(change)
 	return scrubbed
 
@@ -320,30 +373,40 @@ def scrub_version_data(
 	placeholder: str,
 	tables: dict[str, set[str]] | None = None,
 	renames: dict[str, str] | None = None,
+	matcher=None,
 ) -> dict:
 	"""A copy of a Version's `data` with the values of personal `fields` replaced by
 	`placeholder`. `tables` maps a child table fieldname to the personal fields of its rows,
 	scrubbed in `added`, `removed` and `row_changed` entries. `renames` maps old record names
 	to new ones: any value exactly equal to an old name (a link to a renamed contact, say)
-	becomes the new name. Other changes are kept."""
+	becomes the new name. Other changes are kept.
+
+	Without `matcher` every personal value is replaced (the history of the person's own
+	records). With one, only the person's data is (a record shared with others): a value
+	when `matcher.value(fieldname, value)`, a whole table row when `matcher.row(row_dict)`
+	or, for `row_changed`, `matcher.row_name(row_name)`; in other rows only the values
+	`matcher.value` accepts."""
 	tables = tables or {}
+	is_hers = matcher.value if matcher else None
 	out = _rename_values(data, renames) if renames else deepcopy(data)
 	if "changed" in out:
-		out["changed"] = _scrub_changes(out["changed"], fields, placeholder)
+		out["changed"] = _scrub_changes(out["changed"], fields, placeholder, is_hers)
 
 	for key in ("added", "removed"):
 		for entry in out.get(key) or []:
 			# [table fieldname, row as dict]
 			if len(entry) == 2 and entry[0] in tables and isinstance(entry[1], dict):
 				row = entry[1]
+				whole_row = matcher is None or matcher.row(row)
 				for fieldname in tables[entry[0]]:
-					if row.get(fieldname):
+					if row.get(fieldname) and (whole_row or is_hers(fieldname, row[fieldname])):
 						row[fieldname] = placeholder
 
 	for entry in out.get("row_changed") or []:
 		# [table fieldname, row index, row name, [[fieldname, old, new], ...]]
 		if len(entry) == 4 and entry[0] in tables:
-			entry[3] = _scrub_changes(entry[3], tables[entry[0]], placeholder)
+			whole_row = matcher is None or matcher.row_name(entry[2])
+			entry[3] = _scrub_changes(entry[3], tables[entry[0]], placeholder, None if whole_row else is_hers)
 	return out
 
 
@@ -354,7 +417,29 @@ def _version_tables(doctype: str) -> dict[str, set[str]]:
 	return tables
 
 
-def _scrub_versions(doctype: str, names: list[str], placeholder: str, renames: dict[str, str]) -> None:
+class _DealVersionMatcher:
+	"""Tells the person's data apart from other people's in a shared deal's history."""
+
+	def __init__(self, person: _Person, contacts: set[str], rows: set[str]):
+		self.person = person
+		self.contacts = contacts  # the person's contact names, old and new
+		self.rows = rows  # names of the person's contacts rows on the deal
+
+	def value(self, fieldname: str, value) -> bool:
+		return _value_is_persons(_kind_of(fieldname), value, self.person)
+
+	def row(self, row: dict) -> bool:
+		return row.get("name") in self.rows or _is_person_row(row, self.contacts, self.person)
+
+	def row_name(self, name) -> bool:
+		return name in self.rows
+
+
+def _scrub_versions(
+	doctype: str, names: list[str], placeholder: str, renames: dict[str, str], matcher_for=None
+) -> None:
+	"""Scrub the Versions of `names`. `matcher_for(docname)`, when given, returns the matcher
+	that limits scrubbing to the person's data on that record."""
 	if not names:
 		return
 	fields = personal_fields(doctype)
@@ -362,7 +447,7 @@ def _scrub_versions(doctype: str, names: list[str], placeholder: str, renames: d
 	versions = frappe.get_all(
 		"Version",
 		filters={"ref_doctype": doctype, "docname": ["in", names]},
-		fields=["name", "data"],
+		fields=["name", "docname", "data"],
 	)
 	for version in versions:
 		try:
@@ -371,7 +456,8 @@ def _scrub_versions(doctype: str, names: list[str], placeholder: str, renames: d
 			continue
 		if not isinstance(data, dict):
 			continue
-		scrubbed = scrub_version_data(data, fields, placeholder, tables, renames)
+		matcher = matcher_for(version.docname) if matcher_for else None
+		scrubbed = scrub_version_data(data, fields, placeholder, tables, renames, matcher)
 		if scrubbed != data:
 			frappe.db.set_value(
 				"Version",
@@ -438,6 +524,55 @@ def _apply_renames(request, targets, renames: dict[str, str]) -> None:
 	targets.addresses = sorted(renames.get(name, name) for name in targets.addresses)
 
 
+def _retitle_contact_links(names, placeholder: str) -> None:
+	"""Dynamic Link rows to the renamed contacts, under any parent, keep the contact's old
+	title (its name) in `link_title`; replace it."""
+	if not names:
+		return
+	link = frappe.qb.DocType("Dynamic Link")
+	(
+		frappe.qb.update(link)
+		.set(link.link_title, placeholder)
+		.where((link.link_doctype == "Contact") & link.link_name.isin(list(names)))
+	).run()
+
+
+# -- Addresses ---------------------------------------------------------------------------
+
+
+def split_addresses(addresses: list[str], contacts) -> tuple[list[str], list[str]]:
+	"""(own, shared): addresses linked only to the person's `contacts`, and addresses also
+	linked to anyone or anything else."""
+	if not addresses:
+		return [], []
+	contacts = set(contacts)
+	links = frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Address", "parent": ["in", addresses]},
+		fields=["parent", "link_doctype", "link_name"],
+		parent_doctype="Address",
+	)
+	shared = {
+		link.parent for link in links if not (link.link_doctype == "Contact" and link.link_name in contacts)
+	}
+	return sorted(set(addresses) - shared), sorted(shared & set(addresses))
+
+
+def _unlink_shared_addresses(addresses: list[str], contacts) -> None:
+	"""Take the person's contacts off addresses others use too; the address itself stays."""
+	if not addresses or not contacts:
+		return
+	frappe.db.delete(
+		"Dynamic Link",
+		{
+			"parenttype": "Address",
+			"parent": ["in", addresses],
+			"link_doctype": "Contact",
+			"link_name": ["in", sorted(contacts)],
+		},
+	)
+
+
 # -- Deleted copies ----------------------------------------------------------------------
 
 
@@ -480,35 +615,46 @@ def erase_records(request, targets) -> None:
 	"""Anonymize the leads, contacts, addresses and deals in `targets`, rename the contacts
 	and addresses (their names are the person's name), scrub the records' change history,
 	and remove deleted copies that name the person. Statuses, values and stages are
-	untouched; nothing is deleted except the contacts' email/phone rows and deleted copies.
+	untouched; nothing is deleted except the contacts' email/phone rows, the person's links
+	on shared addresses, and deleted copies.
 
-	`request.matches`, `targets.contacts` and `targets.addresses` are updated in place to
-	the new names."""
+	An address also linked to someone or something else is not erased: only the person's
+	link to it is removed, and it is dropped from `targets.addresses`. `request.matches`,
+	`targets.contacts` and `targets.addresses` are updated in place to the new names."""
 	placeholder = placeholder_person(request.name)
 	# Read what is the person's before any of it is blanked.
 	person = _read_person(request)
-	contacts = set(targets.contacts)
+	old_contacts = set(targets.contacts)
+	own_addresses, shared_addresses = split_addresses(targets.addresses, old_contacts)
 
-	for deal in targets.deals_still_on:
-		_erase_deal(deal, contacts, person, placeholder)
+	her_rows = {deal: _erase_deal(deal, old_contacts, person, placeholder) for deal in targets.deals_still_on}
 	for lead in targets.leads:
 		_erase_record("CRM Lead", lead, placeholder)
 	for contact in targets.contacts:
 		_erase_contact(contact, placeholder)
-	for address in targets.addresses:
+	for address in own_addresses:
 		_erase_record("Address", address, placeholder)
+	_unlink_shared_addresses(shared_addresses, old_contacts)
+	targets.addresses = own_addresses
 
 	renames = _rename("Contact", targets.contacts, placeholder)
 	renames |= _rename("Address", targets.addresses, f"{placeholder}-Address")
 	_apply_renames(request, targets, renames)
+	_retitle_contact_links(targets.contacts, placeholder)
 
-	for doctype, names in (
-		("CRM Lead", targets.leads),
-		("Contact", targets.contacts),
-		("CRM Deal", targets.deals_still_on),
-		("Address", targets.addresses),
+	all_contacts = old_contacts | set(targets.contacts)
+
+	def deal_matcher(deal):
+		# Deals are shared with other contacts: only the person's data goes.
+		return _DealVersionMatcher(person, all_contacts, her_rows.get(deal, set()))
+
+	for doctype, names, matcher_for in (
+		("CRM Lead", targets.leads, None),
+		("Contact", targets.contacts, None),
+		("CRM Deal", targets.deals_still_on, deal_matcher),
+		("Address", targets.addresses, None),
 	):
-		_scrub_versions(doctype, names, placeholder, renames)
+		_scrub_versions(doctype, names, placeholder, renames, matcher_for)
 
 	deleted = _deleted_documents_naming(sorted(person.emails), sorted(person.phones))
 	if deleted:

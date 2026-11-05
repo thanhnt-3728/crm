@@ -277,6 +277,55 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 		)
 		self.assertEqual(address.address_title, self.person)
 		self.assertFalse(address.address_line1 or address.city or address.email_id)
+		# The link row to the renamed contact no longer carries her name as its title.
+		titles = frappe.get_all(
+			"Dynamic Link",
+			filters={"parenttype": "Address", "parent": self.new_address, "link_doctype": "Contact"},
+			fields=["link_name", "link_title"],
+			parent_doctype="Address",
+		)
+		self.assertEqual([(t.link_name, t.link_title) for t in titles], [(self.new_contact, self.person)])
+
+	def test_shared_address_keeps_fields_and_loses_only_her_link(self):
+		org = frappe.get_doc(
+			{"doctype": "CRM Organization", "organization_name": "Erasure Shared Org"}
+		).insert(ignore_permissions=True)
+		shared = frappe.get_doc(
+			{
+				"doctype": "Address",
+				"address_title": "Shared Office",
+				"address_type": "Office",
+				"address_line1": "1 Market Street",
+				"city": "Sacramento",
+				"country": "United States",
+				"links": [
+					{"link_doctype": "Contact", "link_name": self.contact.name},
+					{"link_doctype": "CRM Organization", "link_name": org.name},
+				],
+			}
+		).insert(ignore_permissions=True)
+		targets = collect_targets(self.request)
+		self.assertIn(shared.name, targets.addresses)
+
+		erase_records(self.request, targets)
+
+		self.assertNotIn(shared.name, targets.addresses)
+		values = frappe.db.get_value(
+			"Address", shared.name, ["address_title", "address_line1", "city"], as_dict=True
+		)
+		self.assertEqual(
+			(values.address_title, values.address_line1, values.city),
+			("Shared Office", "1 Market Street", "Sacramento"),
+		)
+		links = frappe.get_all(
+			"Dynamic Link",
+			filters={"parenttype": "Address", "parent": shared.name},
+			fields=["link_doctype", "link_name"],
+			parent_doctype="Address",
+		)
+		self.assertEqual(
+			[(link.link_doctype, link.link_name) for link in links], [("CRM Organization", org.name)]
+		)
 
 	def test_own_deal_personal_fields_blanked_values_kept(self):
 		self.erase()
@@ -299,13 +348,23 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 		self.assertEqual((bobs.full_name, bobs.email), ("Bob", BOB_EMAIL))
 
 	def test_generic_deal_fields_blanked_only_with_her_details(self):
-		frappe.db.set_value("CRM Lead", self.lead.name, "gender", "Female")
-		frappe.db.set_value("CRM Deal", self.own_deal.name, "gender", "Female")
-		frappe.db.set_value("CRM Deal", self.bob_deal.name, "gender", "Female")
+		same = {"gender": "Female", "salutation": "Ms", "job_title": "CEO"}
+		frappe.db.set_value("CRM Lead", self.lead.name, same)
+		frappe.db.set_value("CRM Deal", self.own_deal.name, same)
+		frappe.db.set_value("CRM Deal", self.bob_deal.name, same)
 		self.erase()
-		self.assertFalse(frappe.db.get_value("CRM Deal", self.own_deal.name, "gender"))
-		# Same value, but nothing else on Bob's deal is hers: it may well be Bob's.
-		self.assertEqual(frappe.db.get_value("CRM Deal", self.bob_deal.name, "gender"), "Female")
+		# Her own deal: she is its primary contact, so these are hers.
+		own = frappe.db.get_value("CRM Deal", self.own_deal.name, list(same), as_dict=True)
+		self.assertFalse(own.gender or own.salutation or own.job_title)
+		# Bob is primary on the shared deal: equal values may well be Bob's, so they stay.
+		bobs = frappe.db.get_value("CRM Deal", self.bob_deal.name, list(same), as_dict=True)
+		self.assertEqual(dict(bobs), same)
+
+	def test_shared_deal_last_name_alone_kept(self):
+		frappe.db.set_value("CRM Lead", self.lead.name, "last_name", "Vega")
+		frappe.db.set_value("CRM Deal", self.bob_deal.name, {"first_name": "Rosa", "last_name": "Vega"})
+		self.erase()
+		self.assertEqual(frappe.db.get_value("CRM Deal", self.bob_deal.name, "last_name"), "Vega")
 
 	# -- renaming ------------------------------------------------------------------------
 
@@ -423,6 +482,46 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 		changed = {change[0]: change for change in data["changed"]}
 		self.assertEqual(changed["status"][2], self.original_status)
 		self.assertEqual(changed["email"][1:], [self.person, self.person])
+
+	def test_shared_deal_version_keeps_bobs_changes(self):
+		version = frappe.get_doc(
+			{
+				"doctype": "Version",
+				"ref_doctype": "CRM Deal",
+				"docname": self.bob_deal.name,
+				"data": json.dumps(
+					{
+						"changed": [["email", "bob.old@x.net", BOB_EMAIL], ["email", EMAIL, BOB_EMAIL]],
+						"added": [
+							[
+								"contacts",
+								{
+									"name": "bob-row",
+									"contact": self.bob.name,
+									"full_name": "Bob",
+									"email": BOB_EMAIL,
+								},
+							]
+						],
+						"row_changed": [
+							["contacts", 0, "bob-row", [["mobile_no", "+14155550000", BOB_PHONE]]]
+						],
+					}
+				),
+			}
+		).insert(ignore_permissions=True)
+
+		self.erase()
+
+		data = json.loads(frappe.db.get_value("Version", version.name, "data"))
+		self.assertEqual(
+			data["changed"], [["email", "bob.old@x.net", BOB_EMAIL], ["email", self.person, BOB_EMAIL]]
+		)
+		self.assertEqual(
+			data["added"][0][1],
+			{"name": "bob-row", "contact": self.bob.name, "full_name": "Bob", "email": BOB_EMAIL},
+		)
+		self.assertEqual(data["row_changed"][0][3], [["mobile_no", "+14155550000", BOB_PHONE]])
 
 	def test_no_new_version_rows_created(self):
 		n = frappe.db.count("Version")
