@@ -29,6 +29,13 @@ def ensure_deal_status(name, status_type):
 	return name
 
 
+def ensure_lost_reason(name="Pricing"):
+	"""A deal with a Lost status type cannot be saved without a lost reason."""
+	if not frappe.db.exists("CRM Lost Reason", name):
+		frappe.get_doc({"doctype": "CRM Lost Reason", "lost_reason": name}).insert(ignore_permissions=True)
+	return name
+
+
 def make_person(email, phone, owner=OWNER, status="Open", first_name="Marisol"):
 	"""A lead, a contact and a deal for one person: the deal was converted from the lead and
 	lists the contact."""
@@ -57,6 +64,8 @@ def make_person(email, phone, owner=OWNER, status="Open", first_name="Marisol"):
 			"contacts": [{"contact": contact.name}],
 		}
 	)
+	if status == "Lost":
+		deal.lost_reason = ensure_lost_reason()
 	deal.flags.ignore_mandatory = True
 	deal.flags.ignore_links = True
 	deal.insert(ignore_permissions=True)
@@ -375,6 +384,7 @@ class TestPrivacyMatching(IntegrationTestCase):
 	def test_closing_deal_lost_releases_hold(self):
 		r, _lead, _contact, deal = self.held_request()
 		deal.status = ensure_deal_status("Matching Lost", "Lost")
+		deal.lost_reason = ensure_lost_reason()
 		deal.save()
 		self.assertEqual(self.status_of(r), "Awaiting Sign-off")
 		# she is still on the deal, so its match row is not marked as removed
