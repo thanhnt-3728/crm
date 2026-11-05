@@ -2,7 +2,7 @@ from datetime import date
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_days, add_months, today
+from frappe.utils import add_days, add_months, getdate, today
 
 from crm.fcrm.doctype.crm_erasure_request.test_crm_erasure_request import make_request, make_user
 from crm.privacy import system_write
@@ -13,6 +13,9 @@ from crm.privacy.setup import ensure_privacy_setup
 HEAD = "head@example.com"
 COMPLIANCE_USERS = ["comp1@example.com", "comp2@example.com"]
 SETTINGS = "CRM Privacy Settings"
+REQUEST = "CRM Erasure Request"
+# One fixed "today" for the whole run; every reminder/purge call is passed it explicitly.
+NOW = getdate(today())
 
 
 def notifications(user, request=None):
@@ -22,13 +25,18 @@ def notifications(user, request=None):
 	return frappe.get_all("CRM Notification", filters=filters, pluck="message")
 
 
+def count(user, request):
+	"""Privacy notifications for `user` about one request."""
+	return len(notifications(user, request.name))
+
+
 def close(request, **values):
 	"""Put the request in the state close leaves it in."""
 	with system_write():
 		frappe.db.set_value(
 			"CRM Erasure Request",
 			request.name,
-			{"status": "Closed", "answered_on": today(), "outcome": "Completed", **values},
+			{"status": "Closed", "answered_on": NOW, "outcome": "Completed", **values},
 		)
 
 
@@ -43,7 +51,11 @@ class TestPrivacyReminders(IntegrationTestCase):
 
 	def setUp(self):
 		frappe.set_user("Administrator")
+		# Reminders run over every open request: start each test from none, so nothing left by
+		# another test (or by a fixed-date request) can send into this one.
 		frappe.db.delete("CRM Notification", {"type": "Privacy"})
+		frappe.db.delete(REQUEST)
+		frappe.db.delete("CRM Retained Contract")
 		frappe.db.set_single_value(SETTINGS, "head_of_compliance", HEAD)
 
 	def tearDown(self):
@@ -51,13 +63,13 @@ class TestPrivacyReminders(IntegrationTestCase):
 		frappe.flags.privacy_system_write = False
 
 	def test_late_logged_request_sends_each_reminder_once(self):
-		make_request(received_on=add_days(today(), -41))
-		send_due_reminders()
-		send_due_reminders()
-		self.assertEqual(frappe.db.count("CRM Notification", {"type": "Privacy", "to_user": HEAD}), 1)
+		r = make_request(received_on=add_days(NOW, -41))
+		send_due_reminders(NOW)
+		send_due_reminders(NOW)
+		self.assertEqual(count(HEAD, r), 1)
 		for user in COMPLIANCE_USERS:
 			# acknowledgment + day 30
-			self.assertEqual(frappe.db.count("CRM Notification", {"type": "Privacy", "to_user": user}), 2)
+			self.assertEqual(count(user, r), 2)
 
 	def test_ack_reminder_three_business_days_before(self):
 		r = make_request(received_on="2026-10-26")
@@ -93,64 +105,64 @@ class TestPrivacyReminders(IntegrationTestCase):
 
 	def test_day40_falls_back_to_compliance_when_no_head(self):
 		frappe.db.set_single_value(SETTINGS, "head_of_compliance", None)
-		r = make_request(received_on=add_days(today(), -41), acknowledgment_sent=1)
-		send_due_reminders()
+		r = make_request(received_on=add_days(NOW, -41), acknowledgment_sent=1)
+		send_due_reminders(NOW)
 		r.reload()
 		self.assertTrue(r.day40_alert_sent)
 		for user in COMPLIANCE_USERS:
 			# day 30 + day 40
-			self.assertEqual(len(notifications(user, r.name)), 2)
+			self.assertEqual(count(user, r), 2)
 		self.assertEqual(notifications(HEAD, r.name), [])
 
 	def test_message_has_days_left_and_no_requester_details(self):
 		r = make_request(
-			received_on=add_days(today(), -30),
+			received_on=add_days(NOW, -30),
 			acknowledgment_sent=1,
 			requester_names="Marisol Vega",
 			original_message="Please erase marisol@x.net, 916-555-0100",
 		)
-		send_due_reminders()
+		send_due_reminders(NOW)
 		(message,) = notifications(COMPLIANCE_USERS[0], r.name)
 		self.assertEqual(message, f"{r.name}: 15 of 45 days left — respond by {r.respond_by}")
 		for personal in ("Marisol", "Vega", "marisol@x.net", "555"):
 			self.assertNotIn(personal, message)
 
 	def test_closed_request_gets_no_reminders(self):
-		r = make_request(received_on=add_days(today(), -41))
+		r = make_request(received_on=add_days(NOW, -41))
 		close(r)
-		send_due_reminders()
-		self.assertEqual(frappe.db.count("CRM Notification", {"type": "Privacy"}), 0)
+		send_due_reminders(NOW)
+		self.assertEqual(
+			frappe.db.count("CRM Notification", {"type": "Privacy", "reference_name": r.name}), 0
+		)
 
 	def test_purge_after_24_months(self):
-		closed = make_request(received_on=add_months(today(), -26))
-		close(closed, answered_on=add_months(today(), -25), delete_after=add_days(today(), -1))
-		young = make_request(received_on=add_months(today(), -2))
-		close(young, delete_after=add_months(today(), 22))
-		open_request = make_request(received_on=add_months(today(), -26))
+		closed = make_request(received_on=add_months(NOW, -26))
+		close(closed, answered_on=add_months(NOW, -25), delete_after=add_days(NOW, -1))
+		young = make_request(received_on=add_months(NOW, -2))
+		close(young, delete_after=add_months(NOW, 22))
+		open_request = make_request(received_on=add_months(NOW, -26))
 		with system_write():
-			frappe.db.set_value(
-				"CRM Erasure Request", open_request.name, "delete_after", add_days(today(), -1)
-			)
+			frappe.db.set_value("CRM Erasure Request", open_request.name, "delete_after", add_days(NOW, -1))
 		due = frappe.get_doc(
 			{
 				"doctype": "CRM Retained Contract",
 				"person_name": "Erased person",
 				"contract_reference": "C-1",
-				"delete_after": add_days(today(), -1),
+				"delete_after": add_days(NOW, -1),
 			}
 		).insert(ignore_permissions=True)
 		later = frappe.get_doc(
 			{
 				"doctype": "CRM Retained Contract",
 				"contract_reference": "C-2",
-				"delete_after": add_days(today(), 30),
+				"delete_after": add_days(NOW, 30),
 			}
 		).insert(ignore_permissions=True)
 		kept = frappe.get_doc({"doctype": "CRM Retained Contract", "contract_reference": "C-3"}).insert(
 			ignore_permissions=True
 		)
 
-		purge_expired()
+		purge_expired(NOW)
 
 		self.assertFalse(frappe.db.exists("CRM Erasure Request", closed.name))
 		self.assertTrue(frappe.db.exists("CRM Erasure Request", young.name))
@@ -160,9 +172,9 @@ class TestPrivacyReminders(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("CRM Retained Contract", kept.name))
 
 	def test_purge_leaves_no_deleted_document_copy(self):
-		closed = make_request(received_on=add_months(today(), -26))
-		close(closed, delete_after=add_days(today(), -1))
-		purge_expired()
+		closed = make_request(received_on=add_months(NOW, -26))
+		close(closed, delete_after=add_days(NOW, -1))
+		purge_expired(NOW)
 		self.assertFalse(
 			frappe.db.exists(
 				"Deleted Document", {"deleted_doctype": "CRM Erasure Request", "deleted_name": closed.name}
@@ -170,11 +182,11 @@ class TestPrivacyReminders(IntegrationTestCase):
 		)
 
 	def test_purge_removes_notifications_about_the_request(self):
-		closed = make_request(received_on=add_months(today(), -26))
-		send_due_reminders()
+		closed = make_request(received_on=add_months(NOW, -26))
+		send_due_reminders(NOW)
 		self.assertTrue(notifications(COMPLIANCE_USERS[0], closed.name))
-		close(closed, delete_after=add_days(today(), -1))
-		purge_expired()
+		close(closed, delete_after=add_days(NOW, -1))
+		purge_expired(NOW)
 		self.assertFalse(frappe.db.exists("CRM Erasure Request", closed.name))
 		self.assertEqual(notifications(COMPLIANCE_USERS[0], closed.name), [])
 
