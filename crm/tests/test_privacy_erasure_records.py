@@ -195,6 +195,17 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 	def person(self):
 		return placeholder_person(self.request.name)
 
+	@property
+	def new_contact(self):
+		return placeholder_person(self.request.name)
+
+	@property
+	def new_address(self):
+		return f"{placeholder_person(self.request.name)}-Address"
+
+	def versions_of(self, doctype, name):
+		return frappe.get_all("Version", filters={"ref_doctype": doctype, "docname": name}, pluck="data")
+
 	# -- placeholders and pure helpers ---------------------------------------------------
 
 	def test_placeholders(self):
@@ -250,19 +261,19 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 
 	def test_contact_blanked_and_child_rows_removed(self):
 		self.erase()
-		contact = frappe.get_doc("Contact", self.contact.name)
+		contact = frappe.get_doc("Contact", self.new_contact)
 		self.assertEqual(contact.first_name, self.person)
 		self.assertEqual(contact.full_name, self.person)
 		self.assertFalse(contact.email_id or contact.mobile_no or contact.phone)
-		self.assertFalse(frappe.db.exists("Contact Email", {"parent": self.contact.name}))
-		self.assertFalse(frappe.db.exists("Contact Phone", {"parent": self.contact.name}))
+		self.assertFalse(frappe.db.exists("Contact Email", {"parent": self.new_contact}))
+		self.assertFalse(frappe.db.exists("Contact Phone", {"parent": self.new_contact}))
 		# Bob keeps his details.
 		self.assertTrue(frappe.db.exists("Contact Email", {"parent": self.bob.name, "email_id": BOB_EMAIL}))
 
 	def test_address_blanked(self):
 		self.erase()
 		address = frappe.db.get_value(
-			"Address", self.address.name, ["address_title", "address_line1", "city", "email_id"], as_dict=True
+			"Address", self.new_address, ["address_title", "address_line1", "city", "email_id"], as_dict=True
 		)
 		self.assertEqual(address.address_title, self.person)
 		self.assertFalse(address.address_line1 or address.city or address.email_id)
@@ -274,17 +285,15 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 		self.assertEqual(deal.deal_value, 1200)
 		self.assertEqual(deal.status, self.own_deal.status)
 		self.assertEqual([c.full_name for c in deal.contacts], [self.person])
-		self.assertEqual([c.contact for c in deal.contacts], [self.contact.name])
+		self.assertEqual([c.contact for c in deal.contacts], [self.new_contact])
 
 	def test_non_primary_contact_on_deal_primary_untouched(self):
 		self.erase()
 		deal = frappe.get_doc("CRM Deal", self.bob_deal.name)
 		self.assertEqual(deal.email, BOB_EMAIL)
 		self.assertEqual(deal.mobile_no, BOB_PHONE)
-		self.assertEqual(
-			[c.full_name for c in deal.contacts if c.contact == self.contact.name], [self.person]
-		)
-		hers = next(c for c in deal.contacts if c.contact == self.contact.name)
+		self.assertEqual([c.full_name for c in deal.contacts if c.contact == self.new_contact], [self.person])
+		hers = next(c for c in deal.contacts if c.contact == self.new_contact)
 		self.assertFalse(hers.email or hers.mobile_no or hers.phone)
 		bobs = next(c for c in deal.contacts if c.contact == self.bob.name)
 		self.assertEqual((bobs.full_name, bobs.email), ("Bob", BOB_EMAIL))
@@ -297,6 +306,95 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 		self.assertFalse(frappe.db.get_value("CRM Deal", self.own_deal.name, "gender"))
 		# Same value, but nothing else on Bob's deal is hers: it may well be Bob's.
 		self.assertEqual(frappe.db.get_value("CRM Deal", self.bob_deal.name, "gender"), "Female")
+
+	# -- renaming ------------------------------------------------------------------------
+
+	def test_contact_renamed_to_placeholder(self):
+		old = self.contact.name
+		self.erase()
+		self.assertFalse(frappe.db.exists("Contact", old))
+		self.assertTrue(frappe.db.exists("Contact", self.new_contact))
+		deal = frappe.get_doc("CRM Deal", self.bob_deal.name)
+		self.assertIn(self.new_contact, [c.contact for c in deal.contacts])
+		self.assertNotIn(old, [c.contact for c in deal.contacts])
+		# The address keeps its link to the renamed contact.
+		self.assertTrue(
+			frappe.db.exists(
+				"Dynamic Link",
+				{"parent": self.new_address, "link_doctype": "Contact", "link_name": self.new_contact},
+			)
+		)
+		# The request's match row follows the new name, in the database and in memory.
+		self.assertIn(self.new_contact, [m.reference_name for m in self.request.matches])
+		self.assertTrue(
+			frappe.db.exists(
+				"CRM Erasure Match",
+				{
+					"parent": self.request.name,
+					"reference_doctype": "Contact",
+					"reference_name": self.new_contact,
+				},
+			)
+		)
+
+	def test_address_renamed_to_placeholder(self):
+		old = self.address.name
+		self.erase()
+		self.assertFalse(frappe.db.exists("Address", old))
+		self.assertTrue(frappe.db.exists("Address", self.new_address))
+
+	def test_several_contacts_get_numbered_names(self):
+		second = frappe.get_doc(
+			{
+				"doctype": "Contact",
+				"first_name": "Marisol",
+				"last_name": "Vega",
+				"email_ids": [{"email_id": NEW_EMAIL}],
+			}
+		).insert(ignore_permissions=True)
+		self.request.append(
+			"matches",
+			{
+				"reference_doctype": "Contact",
+				"reference_name": second.name,
+				"confirmed": 1,
+				"source": "Identifier match",
+			},
+		)
+		with system_write():
+			self.request.save(ignore_permissions=True)
+		first, last = sorted([self.contact.name, second.name])
+		self.erase()
+		self.assertFalse(frappe.db.exists("Contact", first) or frappe.db.exists("Contact", last))
+		self.assertTrue(frappe.db.exists("Contact", self.new_contact))
+		self.assertTrue(frappe.db.exists("Contact", f"{self.new_contact}-2"))
+
+	def test_rename_comment_removed(self):
+		old_contact, old_address = self.contact.name, self.address.name
+		self.erase()
+		for doctype, old in (("Contact", old_contact), ("Address", old_address)):
+			self.assertFalse(
+				frappe.db.exists("Comment", {"reference_doctype": doctype, "content": ["like", f"%{old}%"]})
+			)
+
+	def test_version_link_values_renamed(self):
+		old = self.contact.name
+		# Bob's deal history holds the added contacts row, linking her contact by name.
+		self.assertTrue(any(f'"{old}"' in data for data in self.versions_of("CRM Deal", self.bob_deal.name)))
+		self.erase()
+		for doctype, name in (
+			("CRM Lead", self.lead.name),
+			("CRM Deal", self.own_deal.name),
+			("CRM Deal", self.bob_deal.name),
+			("Contact", self.new_contact),
+			("Address", self.new_address),
+		):
+			for data in self.versions_of(doctype, name):
+				self.assertNotIn(f'"{old}"', data)
+				self.assertNotIn(f'"{self.address.name}"', data)
+		self.assertTrue(
+			any(f'"{self.new_contact}"' in data for data in self.versions_of("CRM Deal", self.bob_deal.name))
+		)
 
 	# -- change history ------------------------------------------------------------------
 

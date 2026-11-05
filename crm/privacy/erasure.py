@@ -1,8 +1,9 @@
 """Carrying out an approved erasure request (spec 5.6).
 
 Records: the person's leads, contacts, addresses and the deals they are still on keep
-existing as anonymized shells, so links and dashboard numbers hold. Their change history
-and any Deleted Document copies that name the person are scrubbed too.
+existing as anonymized shells, so links and dashboard numbers hold. Contacts and addresses,
+whose names are built from the person's name, are renamed to the placeholder. Their change
+history and any Deleted Document copies that name the person are scrubbed too.
 
 Nothing here calls `doc.save()` on an erased record: writes go through
 `frappe.db.set_value(..., update_modified=False)` and `frappe.db.delete`, so no new
@@ -301,14 +302,32 @@ def _scrub_changes(changes, fields: set[str], placeholder: str) -> list:
 	return scrubbed
 
 
+def _rename_values(value, renames: dict[str, str]):
+	"""`value` (parsed JSON) with every string exactly equal to a key of `renames` replaced
+	by its value, at any depth."""
+	if isinstance(value, str):
+		return renames.get(value, value)
+	if isinstance(value, list | tuple):
+		return [_rename_values(item, renames) for item in value]
+	if isinstance(value, dict):
+		return {key: _rename_values(item, renames) for key, item in value.items()}
+	return value
+
+
 def scrub_version_data(
-	data: dict, fields: set[str], placeholder: str, tables: dict[str, set[str]] | None = None
+	data: dict,
+	fields: set[str],
+	placeholder: str,
+	tables: dict[str, set[str]] | None = None,
+	renames: dict[str, str] | None = None,
 ) -> dict:
 	"""A copy of a Version's `data` with the values of personal `fields` replaced by
 	`placeholder`. `tables` maps a child table fieldname to the personal fields of its rows,
-	scrubbed in `added`, `removed` and `row_changed` entries. Other changes are kept."""
+	scrubbed in `added`, `removed` and `row_changed` entries. `renames` maps old record names
+	to new ones: any value exactly equal to an old name (a link to a renamed contact, say)
+	becomes the new name. Other changes are kept."""
 	tables = tables or {}
-	out = deepcopy(data)
+	out = _rename_values(data, renames) if renames else deepcopy(data)
 	if "changed" in out:
 		out["changed"] = _scrub_changes(out["changed"], fields, placeholder)
 
@@ -335,7 +354,7 @@ def _version_tables(doctype: str) -> dict[str, set[str]]:
 	return tables
 
 
-def _scrub_versions(doctype: str, names: list[str], placeholder: str) -> None:
+def _scrub_versions(doctype: str, names: list[str], placeholder: str, renames: dict[str, str]) -> None:
 	if not names:
 		return
 	fields = personal_fields(doctype)
@@ -352,7 +371,7 @@ def _scrub_versions(doctype: str, names: list[str], placeholder: str) -> None:
 			continue
 		if not isinstance(data, dict):
 			continue
-		scrubbed = scrub_version_data(data, fields, placeholder, tables)
+		scrubbed = scrub_version_data(data, fields, placeholder, tables, renames)
 		if scrubbed != data:
 			frappe.db.set_value(
 				"Version",
@@ -361,6 +380,62 @@ def _scrub_versions(doctype: str, names: list[str], placeholder: str) -> None:
 				frappe.as_json(scrubbed, indent=None, separators=(",", ":")),
 				update_modified=False,
 			)
+
+
+# -- Renaming records named after the person ---------------------------------------------
+
+
+def _new_names(names: list[str], base: str) -> dict[str, str]:
+	"""{old name: new name}: `base` for the first of the sorted `names`, then `base-2`, ..."""
+	return {old: base if i == 1 else f"{base}-{i}" for i, old in enumerate(sorted(names), start=1)}
+
+
+def _rename(doctype: str, names: list[str], base: str) -> dict[str, str]:
+	"""Rename `doctype` records whose names identify the person (Contact and Address names
+	are built from the person's name) and return {old: new}. `rename_doc` carries the new
+	name into every Link and Dynamic Link, Version.docname included; the "renamed from"
+	comment it adds names the person, so it is deleted."""
+
+	def edit_comments(name):
+		return set(
+			frappe.get_all(
+				"Comment",
+				filters={"reference_doctype": doctype, "reference_name": name, "comment_type": "Edit"},
+				pluck="name",
+			)
+		)
+
+	renames = {}
+	for old, new in _new_names(names, base).items():
+		if old == new:
+			continue
+		existing = edit_comments(old)
+		frappe.rename_doc(
+			doctype,
+			old,
+			new,
+			force=True,
+			ignore_permissions=True,
+			show_alert=False,
+			rebuild_search=False,
+		)
+		renames[old] = new
+		# The comment the rename added (its text may HTML-escape the old name, so it is
+		# found as the one that was not there before).
+		added = edit_comments(new) - existing
+		if added:
+			frappe.db.delete("Comment", {"name": ["in", sorted(added)]})
+	return renames
+
+
+def _apply_renames(request, targets, renames: dict[str, str]) -> None:
+	"""Point the in-memory request and targets at the new names, so later steps (and a later
+	save of the request) do not bring the old ones back."""
+	for row in request.matches:
+		if row.reference_doctype in ("Contact", "Address") and row.reference_name in renames:
+			row.reference_name = renames[row.reference_name]
+	targets.contacts = sorted(renames.get(name, name) for name in targets.contacts)
+	targets.addresses = sorted(renames.get(name, name) for name in targets.addresses)
 
 
 # -- Deleted copies ----------------------------------------------------------------------
@@ -402,9 +477,13 @@ def _deleted_documents_naming(emails, phones) -> set[str]:
 
 
 def erase_records(request, targets) -> None:
-	"""Anonymize the leads, contacts, addresses and deals in `targets`, scrub their change
-	history, and remove deleted copies that name the person. Statuses, values and stages are
-	untouched; nothing is deleted except the contacts' email/phone rows and deleted copies."""
+	"""Anonymize the leads, contacts, addresses and deals in `targets`, rename the contacts
+	and addresses (their names are the person's name), scrub the records' change history,
+	and remove deleted copies that name the person. Statuses, values and stages are
+	untouched; nothing is deleted except the contacts' email/phone rows and deleted copies.
+
+	`request.matches`, `targets.contacts` and `targets.addresses` are updated in place to
+	the new names."""
 	placeholder = placeholder_person(request.name)
 	# Read what is the person's before any of it is blanked.
 	person = _read_person(request)
@@ -419,13 +498,17 @@ def erase_records(request, targets) -> None:
 	for address in targets.addresses:
 		_erase_record("Address", address, placeholder)
 
+	renames = _rename("Contact", targets.contacts, placeholder)
+	renames |= _rename("Address", targets.addresses, f"{placeholder}-Address")
+	_apply_renames(request, targets, renames)
+
 	for doctype, names in (
 		("CRM Lead", targets.leads),
 		("Contact", targets.contacts),
 		("CRM Deal", targets.deals_still_on),
 		("Address", targets.addresses),
 	):
-		_scrub_versions(doctype, names, placeholder)
+		_scrub_versions(doctype, names, placeholder, renames)
 
 	deleted = _deleted_documents_naming(sorted(person.emails), sorted(person.phones))
 	if deleted:
