@@ -17,6 +17,7 @@ from crm.privacy.erasure import placeholder_content
 from crm.privacy.identifiers import normalize
 from crm.privacy.matching import (
 	SOURCES,
+	_notify_deal_owners,
 	active_identifiers,
 	open_deals_with_person,
 	refresh_identifiers,
@@ -333,10 +334,12 @@ def preview(name: str) -> dict:
 # -- Approval ----------------------------------------------------------------------------
 
 
-def _hold(request) -> None:
-	"""Put the request On Hold and make that stick even though the caller now raises."""
+def _hold(request, deals: list[str]) -> None:
+	"""Put the request On Hold and ask the deals' owners to act, and make that stick even
+	though the caller now raises."""
 	request.status = ON_HOLD
 	_save_as_system(request)
+	_notify_deal_owners(request, deals)
 	frappe.db.commit()
 
 
@@ -363,8 +366,9 @@ def approve(name: str, typed_name: str) -> None:
 
 	# A person may have been put on an open deal since the request was submitted.
 	request.reload()
-	if open_deals_with_person(request):
-		_hold(request)
+	deals = open_deals_with_person(request)
+	if deals:
+		_hold(request, deals)
 		frappe.throw(_("The person is on an open deal. The request is On Hold until that is resolved."))
 
 	table = frappe.qb.DocType(REQUEST)
@@ -448,6 +452,17 @@ def _wipe_details(request) -> None:
 		row.description = placeholder  # the description is mandatory: it keeps its row
 
 
+def _wipe_comments(name: str) -> None:
+	"""Comments on the request (Compliance's notes) may name the person."""
+	frappe.db.set_value(
+		"Comment",
+		{"reference_doctype": REQUEST, "reference_name": name},
+		"content",
+		placeholder_content(name),
+		update_modified=False,
+	)
+
+
 @frappe.whitelist()
 def close(name: str, answered_on: str, outcome: str, denial_reason: str = "") -> None:
 	"""Close an erased or declined request once the answer is sent. Wipes its identifying
@@ -464,6 +479,8 @@ def close(name: str, answered_on: str, outcome: str, denial_reason: str = "") ->
 		frappe.throw(_("Date answered is required to close a request."))
 	if outcome not in OUTCOMES:
 		frappe.throw(_("An outcome is required to close a request."))
+	if request.status == "Declined" and outcome != "Denied":
+		frappe.throw(_("A declined request was not carried out: its outcome can only be Denied."))
 
 	request.answered_on = getdate(answered_on)
 	request.outcome = outcome
@@ -479,5 +496,6 @@ def close(name: str, answered_on: str, outcome: str, denial_reason: str = "") ->
 		erase_communications(emails, name, person_values)
 
 	_wipe_details(request)
+	_wipe_comments(name)
 	_save_as_system(request, ignore_version=True)
 	frappe.db.delete("Version", {"ref_doctype": REQUEST, "docname": name})

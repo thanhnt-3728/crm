@@ -318,6 +318,22 @@ class TestPrivacyAPI(IntegrationTestCase):
 		enqueue.assert_not_called()
 		self.assertEqual(self.status_of(request), "On Hold")
 
+	def test_approve_recheck_notifies_deal_owners(self):
+		_lead, contact, deal = make_person("marisol@x.net", "+19165550100", status="Open")
+		request = self.awaiting(
+			matches=[{"reference_doctype": "Contact", "reference_name": contact.name, "confirmed": 1}]
+		)
+		frappe.set_user(COMPLIANCE)
+		with approval_job_queued():
+			self.assertRaises(frappe.ValidationError, approve, request.name, request.name)
+		text = frappe.db.get_value(
+			"CRM Notification",
+			{"to_user": deal.deal_owner, "type": "Privacy", "reference_name": deal.name},
+			"notification_text",
+		)
+		self.assertTrue(text)
+		self.assertIn(request.name, text)
+
 	# -- decline ---------------------------------------------------------------------------
 
 	def test_decline_needs_reason(self):
@@ -409,6 +425,44 @@ class TestPrivacyAPI(IntegrationTestCase):
 		close(r.name, today(), "Denied")
 		self.assertEqual(frappe.db.get_value(REQUEST, r.name, "denial_reason"), "Identity not verifiable")
 		self.assertEqual(self.status_of(r), "Closed")
+
+	def test_close_declined_request_needs_denied_outcome(self):
+		r = make_request(status="Declined", denial_reason="Identity not verifiable", logged_by=LOGGER)
+		frappe.set_user(COMPLIANCE)
+		for outcome in ("Completed", "Partly completed"):
+			self.assertRaises(frappe.ValidationError, close, r.name, today(), outcome)
+		self.assertEqual(self.status_of(r), "Declined")
+
+	def test_close_declined_request_new_reason_replaces_decline_reason(self):
+		r = make_request(status="Declined", denial_reason="Identity not verifiable", logged_by=LOGGER)
+		frappe.set_user(COMPLIANCE)
+		close(r.name, today(), "Denied", "Legal exemption")
+		self.assertEqual(frappe.db.get_value(REQUEST, r.name, "denial_reason"), "Legal exemption")
+
+	def test_close_wipes_comments_on_the_request(self):
+		r = self.erased(requester_names="Marisol Vega")
+		comment = frappe.get_doc(
+			{
+				"doctype": "Comment",
+				"comment_type": "Comment",
+				"reference_doctype": REQUEST,
+				"reference_name": r.name,
+				"content": "Spoke to Marisol Vega by phone",
+			}
+		).insert(ignore_permissions=True)
+		elsewhere = frappe.get_doc(
+			{
+				"doctype": "Comment",
+				"comment_type": "Comment",
+				"reference_doctype": "User",
+				"reference_name": LOGGER,
+				"content": "Unrelated note",
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(COMPLIANCE)
+		close(r.name, today(), "Completed")
+		self.assertEqual(frappe.db.get_value("Comment", comment.name, "content"), placeholder_content(r.name))
+		self.assertEqual(frappe.db.get_value("Comment", elsewhere.name, "content"), "Unrelated note")
 
 	def test_close_denied_needs_reason(self):
 		r = self.erased()
