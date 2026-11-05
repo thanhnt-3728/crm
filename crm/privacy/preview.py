@@ -36,7 +36,9 @@ class Targets:
 
 	"Erased records" are `leads`, `contacts` and `deals_still_on`. `deals_removed_from` are
 	confirmed deals the person was taken off while the request was On Hold: only their emails and
-	calls that name them are erased, nothing else on the deal."""
+	calls that name them, and the deal's own personal fields that are the person's (a deal
+	converted from the person's lead keeps their name from it), are erased; nothing else on
+	the deal."""
 
 	leads: list[str] = field(default_factory=list)
 	contacts: list[str] = field(default_factory=list)
@@ -205,6 +207,8 @@ def collect_targets(request) -> Targets:
 KINDS = {
 	"Lead": ("CRM Lead", "leads", ("lead_name",)),
 	"Deal": ("CRM Deal", "deals_still_on", ("organization",)),
+	# Deals the person was taken off: only the deal's personal fields that are theirs.
+	"Deal details": ("CRM Deal", "deals_removed_from", ("organization",)),
 	"Contact": ("Contact", "contacts", ("full_name",)),
 	"Address": ("Address", "addresses", ("address_title",)),
 	"Email": ("Communication", "communications", ("subject",)),
@@ -227,6 +231,9 @@ def _label(kind: str, name: str, row) -> str:
 		return (text[:80] + "…") if len(text) > 80 else text or name
 	if kind == "Deal":
 		return f"{name} ({row.organization})" if row.organization else name
+	if kind == "Deal details":
+		deal = f"{name} ({row.organization})" if row.organization else name
+		return _("{0}: the person's name and details on the deal").format(deal)
 	if kind == "Email":
 		return row.subject or name
 	columns = KINDS[kind][2]
@@ -295,7 +302,7 @@ def _kept_on_removed_deals(targets: Targets) -> list[dict]:
 				{
 					"label": _("Notes, tasks, comments and files of {0} ({1})").format(deal, count),
 					"reason": _(
-						"Kept: the person was removed from this open deal before erasure, so only emails and calls naming them are erased."
+						"Kept: the person was removed from this open deal before erasure, so only emails and calls naming them, and their details on the deal, are erased."
 					),
 				}
 			)

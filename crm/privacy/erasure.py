@@ -291,13 +291,8 @@ def _deal_identifies_person(current: dict, person: _Person) -> bool:
 
 def _erase_deal(name: str, contacts: set[str], person: _Person, placeholder: str) -> set[str]:
 	"""Anonymize the person's contacts rows on the deal and blank the deal's own personal
-	fields that are the person's. Returns the names of the person's contacts rows.
-
-	A deal's email and phones are copied from its primary contact, so each is blanked only
-	when it holds the person's value. The deal's other personal fields (names, job title,
-	gender, social profiles...) are blanked only when the deal is about the person: the
-	person is its primary contact, or its email, phone, full name or social profile is the
-	person's. Otherwise they may belong to someone else and are left alone."""
+	fields that are the person's (`_erase_deal_fields`; the deal is about the person when
+	they are its primary contact). Returns the names of the person's contacts rows."""
 	row_values = _blanked_values("CRM Contacts", personal_fields("CRM Contacts"))
 	if frappe.get_meta("CRM Contacts").has_field("full_name"):
 		row_values["full_name"] = placeholder
@@ -312,10 +307,22 @@ def _erase_deal(name: str, contacts: set[str], person: _Person, placeholder: str
 		if row_values:
 			frappe.db.set_value("CRM Contacts", row.name, row_values, update_modified=False)
 
+	_erase_deal_fields(name, person, about_person=any(row.is_primary for row in hers))
+	return {row.name for row in hers}
+
+
+def _erase_deal_fields(name: str, person: _Person, about_person: bool) -> None:
+	"""Blank the deal's own personal fields that are the person's.
+
+	Email and phone fields are blanked only when they hold the person's value: they are
+	copied from the deal's current primary contact, who may be someone else. The other
+	personal fields (names, job title, gender, social profiles...) are blanked when the deal
+	is about the person: `about_person`, or an email, phone, full name or social profile on
+	the deal is the person's."""
 	meta = frappe.get_meta("CRM Deal")
 	fields = [f for f in personal_fields("CRM Deal") if meta.has_field(f)]
 	if not fields:
-		return {row.name for row in hers}
+		return
 	current = frappe.db.get_value("CRM Deal", name, fields, as_dict=True) or {}
 
 	contact_fields = {f for f in fields if _kind_of(f, meta.get_field(f)) != "Text"}
@@ -325,13 +332,27 @@ def _erase_deal(name: str, contacts: set[str], person: _Person, placeholder: str
 		if isinstance(current.get(f), str)
 		and _value_is_persons(_kind_of(f, meta.get_field(f)), current.get(f), person)
 	}
-	if matched or any(row.is_primary for row in hers) or _deal_identifies_person(current, person):
+	if matched or about_person or _deal_identifies_person(current, person):
 		matched |= {f for f in fields if f not in contact_fields and current.get(f) not in (None, "", 0)}
 
 	values = {f: _blank(meta.get_field(f).fieldtype) for f in matched}
 	if values:
 		frappe.db.set_value("CRM Deal", name, values, update_modified=False)
-	return {row.name for row in hers}
+
+
+def _erase_removed_deals(deals: list[str], leads: list[str], person: _Person) -> None:
+	"""Deals the person was taken off while the request was On Hold. Taking them off only
+	reset the deal's email and phones (from the new primary contact); a deal converted from
+	the person's lead still holds their name, job title and social profiles from it. Those go,
+	the new primary contact's email and phones stay."""
+	if not deals:
+		return
+	converted_from = dict(
+		frappe.get_all("CRM Deal", filters={"name": ["in", deals]}, fields=["name", "lead"], as_list=True)
+	)
+	leads = set(leads)
+	for deal in deals:
+		_erase_deal_fields(deal, person, about_person=converted_from.get(deal) in leads)
 
 
 def _value_is_persons(kind: str, value, person: _Person) -> bool:
@@ -648,7 +669,8 @@ def erase_records(request, targets) -> None:
 	and addresses (their names are the person's name), scrub the records' change history,
 	and remove deleted copies that name the person. Statuses, values and stages are
 	untouched; nothing is deleted except the contacts' email/phone rows, the person's links
-	on shared addresses, and deleted copies.
+	on shared addresses, and deleted copies. Deals the person was taken off keep their
+	contacts, but their own personal fields that are the person's are blanked too.
 
 	An address also linked to someone or something else is not erased: only the person's
 	link to it is removed, and it is dropped from `targets.addresses`. `request.matches`,
@@ -661,6 +683,7 @@ def erase_records(request, targets) -> None:
 	own_addresses, shared_addresses = split_addresses(targets.addresses, old_contacts)
 
 	her_rows = {deal: _erase_deal(deal, old_contacts, person, placeholder) for deal in targets.deals_still_on}
+	_erase_removed_deals(targets.deals_removed_from, targets.leads, person)
 	for lead in targets.leads:
 		_erase_record("CRM Lead", lead, placeholder)
 	for contact in targets.contacts:

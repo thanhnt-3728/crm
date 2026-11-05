@@ -150,6 +150,9 @@ class TestPrivacyPreview(IntegrationTestCase):
 		preview = get_erasure_preview(request.name)
 		self.assertNotIn(note.name, remove_names(preview, "Note"))
 		self.assertEqual(preview["counts"]["Deal"], 0)
+		# The deal's own fields that are the person's are erased: listed under remove.
+		self.assertEqual(preview["counts"]["Deal details"], 1)
+		self.assertEqual(remove_names(preview, "Deal details"), [deal.name])
 		self.assertTrue(any(deal.name in item["label"] for item in preview["keep"]))
 
 	def test_removed_from_open_deal_emails_are_still_removed(self):

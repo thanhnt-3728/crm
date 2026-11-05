@@ -578,3 +578,105 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("Deleted Document", by_phone.name))
 		self.assertTrue(frappe.db.exists("Deleted Document", bobs.name))
 		self.assertTrue(frappe.db.exists("Deleted Document", other_doctype.name))
+
+	# -- deals the person was taken off ----------------------------------------------------
+
+	def test_deal_she_was_removed_from_loses_her_fields_keeps_new_primary(self):
+		"""A deal converted from her lead holds her name, job title and socials from it.
+		Taking her off the open deal (releasing the hold) only reset its email and phones to
+		Bob's, the new primary contact; erasure blanks the rest, Bob's values stay."""
+		deal = frappe.get_doc(
+			{
+				"doctype": "CRM Deal",
+				"deal_owner": OWNER,
+				"organization": "Matching Test Org",
+				"status": ensure_deal_status("Matching Open", "Open"),
+				"lead": self.lead.name,
+				"first_name": "Marisol",
+				"last_name": "Vega",
+				"lead_name": "Marisol Vega",
+				"job_title": "Office Manager",
+				"linkedin": LINKEDIN,
+				"contacts": [
+					{"contact": self.contact.name, "is_primary": 1},
+					{"contact": self.bob.name, "is_primary": 0},
+				],
+			}
+		)
+		save_deal(deal)
+		# Her contacts row came in as an unconfirmed match (a record created while the
+		# request is open); confirm it.
+		self.request.reload()
+		row = next(
+			(
+				m
+				for m in self.request.matches
+				if m.reference_doctype == "CRM Deal" and m.reference_name == deal.name
+			),
+			None,
+		) or self.request.append(
+			"matches",
+			{"reference_doctype": "CRM Deal", "reference_name": deal.name, "source": "Linked record"},
+		)
+		row.confirmed = 1
+		self.request.status = "On Hold"
+		with system_write():
+			self.request.save(ignore_permissions=True)
+
+		# The owner takes her off and makes Bob primary: the hold is released.
+		deal.reload()
+		deal.contacts = [row for row in deal.contacts if row.contact != self.contact.name]
+		deal.contacts[0].is_primary = 1
+		save_deal(deal)
+		self.request.reload()
+		self.assertEqual(self.request.status, "Awaiting Sign-off")
+		targets = collect_targets(self.request)
+		self.assertIn(deal.name, targets.deals_removed_from)
+
+		erase_records(self.request, targets)
+
+		values = frappe.db.get_value(
+			"CRM Deal",
+			deal.name,
+			["first_name", "last_name", "lead_name", "job_title", "linkedin", "email", "mobile_no"],
+			as_dict=True,
+		)
+		self.assertFalse(
+			values.first_name or values.last_name or values.lead_name or values.job_title or values.linkedin
+		)
+		# Bob's, the deal's primary contact now: left alone.
+		self.assertEqual((values.email, values.mobile_no), (BOB_EMAIL, BOB_PHONE))
+		self.assertEqual(frappe.db.get_value("CRM Deal", deal.name, "organization"), "Matching Test Org")
+
+	def test_deal_she_was_removed_from_not_hers_keeps_other_names(self):
+		"""Not converted from her lead and nothing on it is hers: names stay."""
+		deal = frappe.get_doc(
+			{
+				"doctype": "CRM Deal",
+				"deal_owner": OWNER,
+				"organization": "Matching Test Org",
+				"status": ensure_deal_status("Matching Open", "Open"),
+				"first_name": "Rosa",
+				"last_name": "Vega",
+				"contacts": [{"contact": self.bob.name, "is_primary": 1}],
+			}
+		)
+		save_deal(deal)
+		self.request.reload()
+		self.request.append(
+			"matches",
+			{
+				"reference_doctype": "CRM Deal",
+				"reference_name": deal.name,
+				"confirmed": 1,
+				"source": "Linked record",
+				"removed_from_open_deal": 1,
+			},
+		)
+		with system_write():
+			self.request.save(ignore_permissions=True)
+		self.erase()
+		self.assertEqual(
+			frappe.db.get_value("CRM Deal", deal.name, ["first_name", "last_name", "email"]),
+			("Rosa", "Vega", BOB_EMAIL),
+		)
