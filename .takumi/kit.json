@@ -1,0 +1,10 @@
+{
+  "harnesses": [
+    "claude-code"
+  ],
+  "kits": {
+    "core": {},
+    "extras": {},
+    "sun-extras": {}
+  }
+}

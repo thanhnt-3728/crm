@@ -27,3 +27,8 @@ AGENTS.md
 .claude
 .pi
 .patch
+graphify-out/
+# >>> tkm managed
+.claude/skills/tkm
+.claude/rules/tkm
+# <<< tkm managed
