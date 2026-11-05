@@ -29,6 +29,12 @@
         :label="__('Close request')"
         @click="showClose = true"
       />
+      <Button
+        v-if="canReset"
+        :label="__('Reset stuck erasure')"
+        :loading="resetting"
+        @click="resetStuck"
+      />
     </template>
   </LayoutHeader>
 
@@ -99,6 +105,17 @@
       >
         <div class="font-medium">{{ __('The erasure failed') }}</div>
         <div class="whitespace-pre-line">{{ doc.erasure_error }}</div>
+      </div>
+
+      <div
+        v-if="canReset"
+        class="rounded-md bg-surface-amber-2 p-3 text-base text-ink-amber-7"
+      >
+        {{
+          __(
+            'The erasure job has not finished an hour after approval. Reset the request to put it back for sign-off; nothing was erased.',
+          )
+        }}
       </div>
 
       <div
@@ -310,6 +327,7 @@ import { usersStore } from '@/stores/users'
 import { formatDate } from '@/utils'
 import {
   canApprove,
+  canResetStuck,
   daysLeftLabel,
   errorText,
   statusTheme,
@@ -333,6 +351,7 @@ const saving = ref(false)
 const actionError = ref('')
 const holdDeals = ref([])
 const contractReferences = ref('')
+const resetting = ref(false)
 
 const request = createResource({
   url: 'crm.api.erasure.get_request',
@@ -381,6 +400,9 @@ const canClose = computed(
     isCompliance() &&
     ['Erased', 'Declined'].includes(doc.value?.status),
 )
+const canReset = computed(
+  () => !restricted.value && canResetStuck(doc.value, isCompliance()),
+)
 const canSeeEmails = computed(() => isCompliance() || isManager())
 const canEditMatches = computed(
   () =>
@@ -419,6 +441,20 @@ async function loadHoldDeals(data) {
 function loadEmails(data) {
   if (!data.doctype || data.status === 'Closed' || !canSeeEmails.value) return
   emails.reload()
+}
+
+async function resetStuck() {
+  resetting.value = true
+  actionError.value = ''
+  try {
+    await call('crm.api.erasure.reset_stuck', { name: doc.value.name })
+    toast.success(__('The request is back for sign-off'))
+  } catch (e) {
+    actionError.value = errorText(e)
+  } finally {
+    resetting.value = false
+    reload()
+  }
 }
 
 async function submitRequest() {

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_days, add_months, getdate, today
+from frappe.utils import add_days, add_months, add_to_date, getdate, now_datetime, today
 
 from crm.api.erasure import (
 	approve,
@@ -18,6 +18,7 @@ from crm.api.erasure import (
 	list_requests,
 	open_deals,
 	preview,
+	reset_stuck,
 	save_privacy_settings,
 	submit,
 	update_matches,
@@ -291,6 +292,7 @@ class TestPrivacyAPI(IntegrationTestCase):
 			"crm.privacy.erasure.run_erasure",
 			request_name=request.name,
 			queue="long",
+			timeout=3600,
 			enqueue_after_commit=True,
 		)
 
@@ -303,6 +305,57 @@ class TestPrivacyAPI(IntegrationTestCase):
 			self.assertRaises(frappe.PermissionError, preview, request.name)
 		enqueue.assert_not_called()
 		self.assertEqual(self.status_of(request), "Awaiting Sign-off")
+
+	# -- a request stuck in Erasing ----------------------------------------------------------
+
+	def stuck(self, hours_ago=2, **values):
+		request = self.awaiting(**values)
+		with system_write():
+			frappe.db.set_value(
+				REQUEST,
+				request.name,
+				{
+					"status": "Erasing",
+					"approved_by": OTHER_COMPLIANCE,
+					"approved_on": add_to_date(now_datetime(), hours=-hours_ago),
+				},
+			)
+		return request
+
+	def test_reset_stuck_puts_request_back_for_sign_off(self):
+		request = self.stuck()
+		frappe.set_user(COMPLIANCE)
+		self.assertTrue(get_request(request.name)["can_reset"])
+		self.assertEqual(reset_stuck(request.name), "Awaiting Sign-off")
+		status, error = frappe.db.get_value(REQUEST, request.name, ["status", "erasure_error"])
+		self.assertEqual(status, "Awaiting Sign-off")
+		self.assertEqual(error, f"Erasure job did not finish; reset by {COMPLIANCE}")
+		self.assertFalse(get_request(request.name)["can_reset"])
+
+	def test_reset_stuck_refused_within_the_hour_or_when_erased(self):
+		recent = self.stuck(hours_ago=0.5)
+		frappe.set_user(COMPLIANCE)
+		self.assertFalse(get_request(recent.name)["can_reset"])
+		self.assertRaises(frappe.ValidationError, reset_stuck, recent.name)
+		self.assertEqual(self.status_of(recent), "Erasing")
+
+		frappe.set_user("Administrator")
+		finished = self.stuck()
+		frappe.db.set_value(REQUEST, finished.name, "erased_on", now_datetime())
+		frappe.set_user(COMPLIANCE)
+		self.assertRaises(frappe.ValidationError, reset_stuck, finished.name)
+
+		frappe.set_user("Administrator")
+		awaiting = self.awaiting()
+		frappe.set_user(COMPLIANCE)
+		self.assertRaises(frappe.ValidationError, reset_stuck, awaiting.name)
+
+	def test_reset_stuck_is_compliance_only(self):
+		request = self.stuck()
+		for user in (LOGGER, MANAGER, "Administrator"):
+			frappe.set_user(user)
+			self.assertRaises(frappe.PermissionError, reset_stuck, request.name)
+		self.assertEqual(self.status_of(request), "Erasing")
 
 	def test_approve_bumps_modified(self):
 		request = self.awaiting()

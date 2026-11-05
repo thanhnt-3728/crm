@@ -3,6 +3,7 @@ import {
   buildSettingsPayload,
   canApprove,
   canLogRequest,
+  canResetStuck,
   cleanIdentifiers,
   cleanPersonalFields,
   confirmMatches,
@@ -400,6 +401,30 @@ describe('privacy settings', () => {
       buildSettingsPayload({ contractRetentionMonths: 'x' })
         .contract_retention_months,
     ).toBe(0)
+  })
+})
+
+describe('canResetStuck', () => {
+  const stuck = { status: 'Erasing', can_reset: true }
+
+  it('lets Compliance reset a request the server reports stuck', () => {
+    expect(canResetStuck(stuck, true)).toBe(true)
+  })
+
+  it('refuses everyone else', () => {
+    expect(canResetStuck(stuck, false)).toBe(false)
+  })
+
+  it('needs the server to report it stuck', () => {
+    expect(canResetStuck({ status: 'Erasing', can_reset: false }, true)).toBe(
+      false,
+    )
+    expect(canResetStuck({ status: 'Erasing' }, true)).toBe(false)
+  })
+
+  it('only applies while erasing', () => {
+    expect(canResetStuck({ ...stuck, status: 'Erased' }, true)).toBe(false)
+    expect(canResetStuck(null, true)).toBe(false)
   })
 })
 

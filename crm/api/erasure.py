@@ -8,7 +8,7 @@ refuses user writes to its status, approval and bookkeeping fields.
 
 import frappe
 from frappe import _
-from frappe.utils import add_months, cint, getdate, now_datetime, today
+from frappe.utils import add_months, add_to_date, cint, get_datetime, getdate, now_datetime, today
 
 from crm.fcrm.doctype.crm_erasure_request.crm_erasure_request import FULL_ACCESS_ROLES
 from crm.privacy import has_compliance_role, system_write
@@ -34,6 +34,10 @@ LOGGED = "Logged"
 DECLINABLE = (LOGGED, AWAITING, ON_HOLD)
 CLOSABLE = ("Erased", "Declined")
 RETENTION_MONTHS = 24
+# An erasure job still Erasing this long after approval is taken to have died (it runs with
+# this timeout); Compliance may then put the request back for sign-off.
+ERASURE_JOB_TIMEOUT = 3600
+STUCK_AFTER_HOURS = 1
 OUTCOMES = ("Completed", "Partly completed", "Denied")
 KINDS = ("Email", "Phone")
 START_DOCTYPES = ("CRM Lead", "Contact")
@@ -209,7 +213,7 @@ def get_request(name: str) -> dict:
 	request = frappe.get_doc(REQUEST, name)
 
 	if _has_full_access() or (_is_logger(request) and request.status == LOGGED):
-		return {**request.as_dict(), **_numbers(request)}
+		return {**request.as_dict(), **_numbers(request), "can_reset": _is_stuck(request)}
 	if _is_logger(request):
 		return _restricted(request)
 	frappe.throw(_("You do not have access to this request."), frappe.PermissionError)
@@ -399,8 +403,35 @@ def approve(name: str, typed_name: str) -> None:
 		"crm.privacy.erasure.run_erasure",
 		request_name=name,
 		queue="long",
+		timeout=ERASURE_JOB_TIMEOUT,
 		enqueue_after_commit=True,
 	)
+
+
+def _is_stuck(request) -> bool:
+	"""Erasing for over an hour since approval without finishing: the job died (it is
+	stopped after `ERASURE_JOB_TIMEOUT`) or was never run."""
+	if request.status != ERASING or request.erased_on or not request.approved_on:
+		return False
+	return get_datetime(request.approved_on) <= add_to_date(now_datetime(), hours=-STUCK_AFTER_HOURS)
+
+
+@frappe.whitelist()
+def reset_stuck(name: str) -> str:
+	"""Put a request stuck in Erasing back to Awaiting Sign-off, with a note in its erasure
+	error, so it can be approved again. Compliance only. Returns the new status."""
+	_require_compliance()
+	request = _locked_request(name)
+	if not _is_stuck(request):
+		frappe.throw(
+			_(
+				"Only a request that has been erasing for over an hour since approval without finishing can be reset."
+			)
+		)
+	request.status = AWAITING
+	request.erasure_error = _("Erasure job did not finish; reset by {0}").format(frappe.session.user)
+	_save_as_system(request)
+	return request.status
 
 
 @frappe.whitelist()

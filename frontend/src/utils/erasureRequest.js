@@ -41,6 +41,17 @@ export function canApprove(request, sessionUser, isCompliance) {
   )
 }
 
+// The server works out whether the erasure job is stuck (Erasing for over an
+// hour since approval, never finished) and sends `can_reset`; only Compliance may
+// act on it.
+export function canResetStuck(request, isCompliance) {
+  return (
+    Boolean(isCompliance) &&
+    request?.status === 'Erasing' &&
+    Boolean(request.can_reset)
+  )
+}
+
 // Unconfirmed matches on the approval screen, labelled by record type.
 export function unconfirmedMatchItems(matches) {
   const labels = { 'CRM Lead': 'Lead', 'CRM Deal': 'Deal', Contact: 'Contact' }
