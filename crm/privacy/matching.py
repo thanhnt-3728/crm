@@ -315,24 +315,20 @@ def open_deals_with_person(request) -> list[str]:
 
 
 def _notify_deal_owners(request, deals: list[str]) -> None:
-	"""Ask each open deal's owner to take the requester off the deal or close it."""
-	contacts = confirmed(request, "Contact")
-	rows = frappe.get_all(
-		"CRM Contacts",
-		filters={"parenttype": "CRM Deal", "parent": ["in", deals], "contact": ["in", contacts]},
-		fields=["parent", "contact", "full_name"],
-	)
+	"""Ask each open deal's owner to take the requester off the deal or close it. The text
+	names only the request and the deal: the notification outlives the erasure, so it must
+	not carry the person's name."""
 	for deal in deals:
 		owner = frappe.db.get_value("CRM Deal", deal, "deal_owner")
 		if not owner:
 			continue
-		names = list(dict.fromkeys(row.full_name or row.contact for row in rows if row.parent == deal))
-		who = ", ".join(names)
-		subject = _("Remove {0} from {1} or close it — erasure request {2}").format(who, deal, request.name)
+		subject = _("Remove the requester from {0} or close it — erasure request {1}").format(
+			deal, request.name
+		)
 		message = _(
-			"{0} has asked for personal data to be erased (request {1}). Remove them from deal {2} "
-			"or close the deal so the request can go ahead."
-		).format(who, request.name, deal)
+			"A contact on deal {0} has asked for their personal data to be erased (request {1}). "
+			"Remove that contact from the deal or close the deal so the request can go ahead."
+		).format(deal, request.name)
 		notify(
 			[owner],
 			subject,

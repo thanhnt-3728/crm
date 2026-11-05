@@ -761,7 +761,11 @@ def erase_content(request, targets, person_values: set[str]) -> None:
 	eraser.delete_files(targets.files)
 	eraser.whatsapp(targets.wa_messages, targets.wa_profiles)
 
-	eraser.notifications(erased, content)
+	# Notifications about deals the person was taken off (the hold notices sent to their
+	# owners, say) may name the person too: their values in them are replaced as well.
+	eraser.notifications(
+		{**erased, "CRM Deal": [*targets.deals_still_on, *targets.deals_removed_from]}, content
+	)
 	eraser.email_queue()
 	eraser.event_participants()
 	eraser.lead_sync_logs()

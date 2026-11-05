@@ -547,6 +547,27 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 			"Marisol from accounting says hi",
 		)
 
+	def test_notification_on_deal_she_was_removed_from_replaced(self):
+		"""A hold notice sent to the owner of the deal she was taken off (as worded before
+		notices stopped naming the person) loses her name; the deal's other notices stay."""
+		hold_notice = self.make_notification(
+			("CRM Deal", self.removed_deal.name),
+			f"Marisol Vega has asked for personal data to be erased. Remove them from deal {self.removed_deal.name}.",
+			f"Remove Marisol Vega from {self.removed_deal.name} or close it",
+		)
+		other = self.make_notification(("CRM Deal", self.removed_deal.name), "Bob signed the quote")
+		self.run_job()
+		self.assertEqual(
+			frappe.db.get_value("CRM Notification", hold_notice.name, ["message", "notification_text"]),
+			(
+				f"{self.person} has asked for personal data to be erased. Remove them from deal {self.removed_deal.name}.",
+				f"Remove {self.person} from {self.removed_deal.name} or close it",
+			),
+		)
+		self.assertEqual(
+			frappe.db.get_value("CRM Notification", other.name, "message"), "Bob signed the quote"
+		)
+
 	def test_email_queue_to_her_deleted(self):
 		def queue(recipient):
 			return frappe.get_doc(

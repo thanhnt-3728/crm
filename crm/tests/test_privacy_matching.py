@@ -313,11 +313,24 @@ class TestPrivacyMatching(IntegrationTestCase):
 		notification = frappe.db.get_value(
 			"CRM Notification",
 			{"to_user": deal.deal_owner, "type": "Privacy", "reference_name": deal.name},
-			"notification_text",
+			["notification_text", "message"],
+			as_dict=True,
 		)
 		self.assertTrue(notification)
-		self.assertIn(f"from {deal.name} or close it — erasure request {r.name}", notification)
-		self.assertIn(contact.first_name, notification)
+		self.assertIn(
+			f"Remove the requester from {deal.name} or close it — erasure request {r.name}",
+			notification.notification_text,
+		)
+		self.assertIn(r.name, notification.message)
+		# The notice outlives the erasure: it names the request and the deal, never the person.
+		for text in (notification.notification_text, notification.message):
+			self.assertNotIn(contact.first_name, text)
+			self.assertNotIn("marisol", text.lower())
+		email = frappe.get_all(
+			"Email Queue", filters={"message": ["like", f"%{r.name}%"]}, pluck="message", limit=1
+		)
+		for message in email:
+			self.assertNotIn("Marisol", message)
 
 	def test_no_open_deal_awaits_sign_off(self):
 		_lead, contact, _deal = make_person("marisol@x.net", "+19165550100", status="Won")
