@@ -263,6 +263,11 @@ def create_lead_from_incoming_email(doc: Communication, method: str | None = Non
 	if not create_lead_enabled:
 		return
 
+	from crm.privacy.inbound import is_erased_sender
+
+	if is_erased_sender(doc.sender):
+		return
+
 	if frappe.db.exists("CRM Lead", {"email": doc.sender}):
 		return
 
