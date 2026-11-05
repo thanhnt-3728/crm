@@ -419,9 +419,19 @@ def _unlisted_custom_fields() -> list[dict]:
 	]
 
 
+def _unconfirmed_matches(request) -> list[dict]:
+	"""Suggested matches nobody confirmed, records created while the request was open
+	among them: erasure leaves them alone."""
+	return [
+		{"doctype": row.reference_doctype, "name": row.reference_name, "source": row.source}
+		for row in request.matches
+		if not row.confirmed and row.reference_doctype and row.reference_name
+	]
+
+
 def get_erasure_preview(request_name: str) -> dict:
 	"""The approval screen: what will be removed, what will be kept, the open checklist
-	items and the custom fields erasure doesn't know about."""
+	items, the custom fields erasure doesn't know about and the matches nobody confirmed."""
 	request = frappe.get_doc(REQUEST, request_name)
 	request.check_permission("read")
 
@@ -441,5 +451,6 @@ def get_erasure_preview(request_name: str) -> dict:
 		"keep": _keep_list(request, targets, shared),
 		"open_checklist": _open_checklist(request, targets),
 		"unlisted_custom_fields": _unlisted_custom_fields(),
+		"unconfirmed_matches": _unconfirmed_matches(request),
 		"recordings_present": targets.recordings_present,
 	}

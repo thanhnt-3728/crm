@@ -41,6 +41,16 @@ export function canApprove(request, sessionUser, isCompliance) {
   )
 }
 
+// Unconfirmed matches on the approval screen, labelled by record type.
+export function unconfirmedMatchItems(matches) {
+  const labels = { 'CRM Lead': 'Lead', 'CRM Deal': 'Deal', Contact: 'Contact' }
+  return (matches || []).map((match) => ({
+    ...match,
+    kind: __(labels[match.doctype] || match.doctype),
+    route: recordRoute(match.doctype, match.name),
+  }))
+}
+
 export function confirmMatches(typed, requestName) {
   return typed.trim() === requestName
 }

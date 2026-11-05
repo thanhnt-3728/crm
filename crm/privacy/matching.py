@@ -10,13 +10,17 @@ from frappe import _
 from pypika import Criterion
 from pypika.functions import Function
 
-from crm.privacy import personal_fields, system_write
+from crm.privacy import compliance_users, personal_fields, system_write
 from crm.privacy.identifiers import extract_emails, normalize, normalize_email
 from crm.privacy.notify import notify
 from crm.utils import normalize_phone, phone_search_digits
 
 REQUEST = "CRM Erasure Request"
 OPEN_DEAL_TYPES = ("Open", "Ongoing", "On Hold")
+NEW_MATCH_SAVEPOINT = "privacy_new_match"
+# A new record is added to a request's matches only before approval; later the erasure
+# job holds the request (and would lose a row saved meanwhile).
+PRE_APPROVAL_STATUSES = ("Logged", "Awaiting Sign-off", "On Hold")
 
 EMAIL_FIELDS = ("email", "email_id")
 PHONE_FIELDS = ("mobile_no", "phone")
@@ -390,3 +394,157 @@ def on_deal_update(doc, method=None) -> None:
 		if not open_deals_with_person(request):
 			with system_write():
 				frappe.db.set_value(REQUEST, name, "status", "Awaiting Sign-off")
+
+
+# -- Records created while a request is open ---------------------------------------------
+
+# Where a new record holds emails and phones: doctype -> ((kind, fieldname), ...), and its
+# child tables: doctype -> ((table fieldname, ((kind, fieldname), ...)), ...).
+NEW_RECORD_FIELDS = {
+	"CRM Lead": (("Email", "email"), ("Phone", "mobile_no"), ("Phone", "phone")),
+	"Contact": (("Email", "email_id"), ("Phone", "mobile_no"), ("Phone", "phone")),
+}
+NEW_RECORD_TABLES = {
+	"Contact": (("email_ids", (("Email", "email_id"),)), ("phone_nos", (("Phone", "phone"),))),
+}
+DEAL_CONTACT_FIELDS = (("Email", "email"), ("Phone", "mobile_no"), ("Phone", "phone"))
+
+
+def _record_label(doctype: str) -> str:
+	return {"CRM Lead": _("lead"), "Contact": _("contact"), "CRM Deal": _("deal")}.get(doctype, doctype)
+
+
+def requests_with_identifiers(emails: set[str], phones: set[str]) -> list[tuple[str, str]]:
+	"""(name, status) of the requests that are not closed and have one of the normalized
+	`emails` or `phones` as an active identifier, oldest first. One query over the
+	identifier table; phones are compared after normalizing, since they are stored as typed."""
+	if not emails and not phones:
+		return []
+	identifier = frappe.qb.DocType("CRM Erasure Identifier")
+	request = frappe.qb.DocType(REQUEST)
+	kinds = []
+	if emails:
+		kinds.append((identifier.kind == "Email") & _lower(identifier.value).isin(sorted(emails)))
+	if phones:
+		kinds.append(identifier.kind == "Phone")
+	rows = (
+		frappe.qb.from_(identifier)
+		.join(request)
+		.on(identifier.parent == request.name)
+		.select(request.name, request.status, identifier.kind, identifier.value)
+		.where(identifier.parenttype == REQUEST)
+		.where(identifier.excluded == 0)
+		.where(request.status != "Closed")
+		.where(Criterion.any(kinds))
+		.orderby(request.creation)
+		.run(as_dict=True)
+	)
+	found = {}
+	for row in rows:
+		value = normalize(row.kind, row.value)
+		if value and value in (emails if row.kind == "Email" else phones):
+			found.setdefault(row.name, row.status)
+	return list(found.items())
+
+
+def _values_of(pairs, source) -> tuple[set[str], set[str]]:
+	"""(emails, phones), normalized, of `source`'s (kind, fieldname) `pairs`."""
+	emails, phones = set(), set()
+	for kind, fieldname in pairs:
+		value = normalize(kind, source.get(fieldname))
+		if value:
+			(emails if kind == "Email" else phones).add(value)
+	return emails, phones
+
+
+def _new_record_identifiers(doc) -> tuple[set[str], set[str]]:
+	emails, phones = _values_of(NEW_RECORD_FIELDS.get(doc.doctype, ()), doc)
+	for table, pairs in NEW_RECORD_TABLES.get(doc.doctype, ()):
+		for row in doc.get(table) or []:
+			row_emails, row_phones = _values_of(pairs, row)
+			emails |= row_emails
+			phones |= row_phones
+	return emails, phones
+
+
+def _new_deal_row_identifiers(doc) -> tuple[set[str], set[str]]:
+	"""Emails and phones on the deal's contacts rows that were not there before this save."""
+	before = doc.get_doc_before_save()
+	old_rows = {row.name for row in (before.contacts if before else []) if row.name}
+	emails, phones = set(), set()
+	for row in doc.get("contacts") or []:
+		if row.name and row.name in old_rows:
+			continue
+		row_emails, row_phones = _values_of(DEAL_CONTACT_FIELDS, row)
+		emails |= row_emails
+		phones |= row_phones
+	return emails, phones
+
+
+def _add_new_match(request_name: str, doctype: str, name: str) -> bool:
+	"""Append the record to the request's matches, unconfirmed. False when it is there."""
+	request = frappe.get_doc(REQUEST, request_name, for_update=True)
+	if any(row.reference_doctype == doctype and row.reference_name == name for row in request.matches):
+		return False
+	request.append(
+		"matches",
+		{"reference_doctype": doctype, "reference_name": name, "confirmed": 0, "source": "Identifier match"},
+	)
+	with system_write():
+		request.save(ignore_permissions=True)
+	return True
+
+
+def _match_new_record(doc, emails: set[str], phones: set[str]) -> None:
+	label = _record_label(doc.doctype)
+	for request, status in requests_with_identifiers(emails, phones):
+		if status in PRE_APPROVAL_STATUSES:
+			if not _add_new_match(request, doc.doctype, doc.name):
+				continue
+			message = _(
+				"A new {0} was created with an email or phone of erasure request {1}. It was added to the "
+				"request's matches, unconfirmed: review it before the request is approved."
+			).format(label, request)
+		elif status == "Erasing":
+			message = _(
+				"A new {0} was created with an email or phone of erasure request {1} while its erasure was "
+				"running. It was not erased: review it by hand."
+			).format(label, request)
+		else:
+			continue  # erased (new records are blocked) or declined (nothing is erased)
+		# The text names no record: a contact's name is the person's name.
+		notify(
+			compliance_users(), _("New record matches erasure request {0}").format(request), message, request
+		)
+
+
+def _guarded(doc, find) -> None:
+	"""Run the new-record check without ever stopping the save: a failure is undone and
+	logged."""
+	if not frappe.db.table_exists(REQUEST):
+		return
+	try:
+		frappe.db.savepoint(NEW_MATCH_SAVEPOINT)
+		emails, phones = find(doc)
+		if emails or phones:
+			_match_new_record(doc, emails, phones)
+	except Exception:
+		frappe.db.rollback(save_point=NEW_MATCH_SAVEPOINT)
+		# Fixed message: no traceback with locals, nothing personal (a contact's name is a
+		# person's name, so no record name either).
+		frappe.log_error(
+			title="Erasure new-record check failed",
+			message=f"Could not check a new {doc.doctype} against open erasure requests.",
+		)
+
+
+def on_record_insert(doc, method=None) -> None:
+	"""CRM Lead and Contact after_insert hook: a record created while a request is open,
+	with one of its active identifiers, comes in as an unconfirmed match, and Compliance is
+	told. It is not blocked: it may be someone else's."""
+	_guarded(doc, _new_record_identifiers)
+
+
+def on_deal_contacts_update(doc, method=None) -> None:
+	"""CRM Deal on_update hook: the same for contacts rows added to a deal."""
+	_guarded(doc, _new_deal_row_identifiers)

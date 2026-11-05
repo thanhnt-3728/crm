@@ -155,6 +155,21 @@ class TestPrivacyPreview(IntegrationTestCase):
 		self.assertEqual(remove_names(preview, "Deal details"), [deal.name])
 		self.assertTrue(any(deal.name in item["label"] for item in preview["keep"]))
 
+	def test_unconfirmed_matches_listed_as_a_warning(self):
+		lead, contact, deal = self.person()
+		request = confirmed_request(lead, contact, deal)
+		# A lead created with her email while the request is open comes in unconfirmed.
+		late = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Late", "email": EMAIL})
+		late.flags.ignore_mandatory = True
+		late.insert(ignore_permissions=True)
+
+		preview = get_erasure_preview(request.name)
+		self.assertEqual(
+			preview["unconfirmed_matches"],
+			[{"doctype": "CRM Lead", "name": late.name, "source": "Identifier match"}],
+		)
+		self.assertNotIn(late.name, remove_names(preview, "Lead"))
+
 	def test_removed_from_open_deal_emails_are_still_removed(self):
 		lead, contact, deal = self.person(status="Open")
 		by_address = make_communication(sender="Marisol@X.net", subject="Names her")

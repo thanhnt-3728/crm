@@ -16,6 +16,7 @@ import {
   sortByDaysLeft,
   startRecord,
   statusTheme,
+  unconfirmedMatchItems,
   urgencyTheme,
 } from '@/utils/erasureRequest'
 
@@ -399,5 +400,35 @@ describe('privacy settings', () => {
       buildSettingsPayload({ contractRetentionMonths: 'x' })
         .contract_retention_months,
     ).toBe(0)
+  })
+})
+
+describe('unconfirmedMatchItems', () => {
+  it('labels each match and links the records that have a page', () => {
+    expect(
+      unconfirmedMatchItems([
+        { doctype: 'CRM Lead', name: 'LEAD-1', source: 'Identifier match' },
+        { doctype: 'Contact', name: 'C-1', source: 'Identifier match' },
+      ]),
+    ).toEqual([
+      {
+        doctype: 'CRM Lead',
+        name: 'LEAD-1',
+        source: 'Identifier match',
+        kind: 'Lead',
+        route: { name: 'Lead', params: { leadId: 'LEAD-1' } },
+      },
+      {
+        doctype: 'Contact',
+        name: 'C-1',
+        source: 'Identifier match',
+        kind: 'Contact',
+        route: { name: 'Contact', params: { contactId: 'C-1' } },
+      },
+    ])
+  })
+
+  it('is empty without matches', () => {
+    expect(unconfirmedMatchItems(undefined)).toEqual([])
   })
 })

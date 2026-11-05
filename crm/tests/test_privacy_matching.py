@@ -1,6 +1,8 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -18,6 +20,7 @@ from crm.privacy.setup import ensure_privacy_setup
 
 OWNER = "matching-owner@example.com"
 OTHER_OWNER = "matching-other-owner@example.com"
+COMPLIANCE = "matching-compliance@example.com"
 SAVEPOINT = "test_privacy_matching"
 
 
@@ -97,6 +100,7 @@ class TestPrivacyMatching(IntegrationTestCase):
 		ensure_privacy_setup()
 		make_user(OWNER, ["Sales User"])
 		make_user(OTHER_OWNER, ["Sales User"])
+		make_user(COMPLIANCE, ["Sales User", "Compliance"])
 
 	def setUp(self):
 		frappe.db.savepoint(SAVEPOINT)
@@ -425,3 +429,81 @@ class TestPrivacyMatching(IntegrationTestCase):
 			r.save(ignore_permissions=True)
 		deal.save()
 		self.assertEqual(self.status_of(r), "Awaiting Sign-off")
+
+	# -- records created while a request is open -----------------------------------------------
+
+	def compliance_notices(self, request):
+		return frappe.get_all(
+			"CRM Notification",
+			filters={
+				"to_user": COMPLIANCE,
+				"type": "Privacy",
+				"reference_doctype": "CRM Erasure Request",
+				"reference_name": request.name,
+			},
+			fields=["notification_text", "message"],
+		)
+
+	def unconfirmed(self, request, doctype):
+		return frappe.get_all(
+			"CRM Erasure Match",
+			filters={"parent": request.name, "reference_doctype": doctype, "confirmed": 0},
+			pluck="reference_name",
+		)
+
+	def test_new_lead_with_an_identifier_is_added_unconfirmed_and_compliance_told(self):
+		r = make_request(identifiers=[{"kind": "Phone", "value": "(916) 555-0100"}])
+		with system_write():
+			r.status = "Awaiting Sign-off"
+			r.save(ignore_permissions=True)
+		lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Marisol", "mobile_no": "916.555.0100"})
+		lead.flags.ignore_mandatory = True
+		lead.insert(ignore_permissions=True)  # allowed: it may be someone else
+
+		self.assertTrue(frappe.db.exists("CRM Lead", lead.name))
+		self.assertEqual(self.unconfirmed(r, "CRM Lead"), [lead.name])
+		self.assertEqual(self.status_of(r), "Awaiting Sign-off")
+		notices = self.compliance_notices(r)
+		self.assertEqual(len(notices), 1)
+		self.assertIn(r.name, notices[0].notification_text)
+		for text in (notices[0].notification_text, notices[0].message):
+			self.assertNotIn("Marisol", text)
+			self.assertNotIn("555", text)
+
+	def test_new_contact_and_new_deal_row_are_added_once(self):
+		r = make_request(identifiers=[{"kind": "Email", "value": "Marisol@X.net"}])
+		lead, contact, deal = make_person("marisol@x.net", "+19165550100", status="Won")
+		self.assertEqual(self.unconfirmed(r, "Contact"), [contact.name])
+		self.assertEqual(self.unconfirmed(r, "CRM Lead"), [lead.name])
+		self.assertEqual(self.unconfirmed(r, "CRM Deal"), [deal.name])
+
+		# Saving the deal again adds no new row and does not repeat the match.
+		deal.reload()
+		deal.save()
+		self.assertEqual(self.unconfirmed(r, "CRM Deal"), [deal.name])
+
+	def test_new_record_not_added_to_closed_or_excluded_requests(self):
+		closed = make_request(identifiers=[{"kind": "Email", "value": "marisol@x.net"}])
+		closed.db_set("status", "Closed")
+		excluded = make_request(identifiers=[{"kind": "Email", "value": "marisol@x.net", "excluded": 1}])
+		lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "M", "email": "marisol@x.net"})
+		lead.flags.ignore_mandatory = True
+		lead.insert(ignore_permissions=True)
+		self.assertEqual(self.unconfirmed(closed, "CRM Lead"), [])
+		self.assertEqual(self.unconfirmed(excluded, "CRM Lead"), [])
+
+	def test_failing_new_record_check_never_stops_the_save(self):
+		make_request(identifiers=[{"kind": "Email", "value": "marisol@x.net"}])
+		with (
+			patch("crm.privacy.matching.requests_with_identifiers", side_effect=Exception("boom")),
+			patch("crm.privacy.matching.frappe.log_error") as log_error,
+		):
+			lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "M", "email": "marisol@x.net"})
+			lead.flags.ignore_mandatory = True
+			lead.insert(ignore_permissions=True)
+		self.assertTrue(frappe.db.exists("CRM Lead", lead.name))
+		ours = [
+			c for c in log_error.call_args_list if c.kwargs.get("title") == "Erasure new-record check failed"
+		]
+		self.assertEqual(len(ours), 1)
+		self.assertNotIn("marisol", ours[0].kwargs["message"].lower())

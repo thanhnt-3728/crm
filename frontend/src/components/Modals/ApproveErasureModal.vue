@@ -77,7 +77,9 @@
 
         <section
           v-if="
-            data.open_checklist.length || data.unlisted_custom_fields.length
+            data.open_checklist.length ||
+            data.unlisted_custom_fields.length ||
+            unconfirmed.length
           "
           class="rounded-md bg-surface-amber-2 p-3"
         >
@@ -91,6 +93,29 @@
             <ul class="list-disc pl-5">
               <li v-for="item in data.open_checklist" :key="item">
                 {{ item }}
+              </li>
+            </ul>
+          </div>
+          <div v-if="unconfirmed.length" class="mb-2">
+            <div class="text-sm text-ink-gray-7">
+              {{
+                __(
+                  'Matches nobody confirmed, records created while the request was open among them. They will not be erased: confirm them on the request first if they are the person.',
+                )
+              }}
+            </div>
+            <ul class="list-disc pl-5">
+              <li v-for="item in unconfirmed" :key="item.doctype + item.name">
+                {{ item.kind }}:
+                <router-link
+                  v-if="item.route"
+                  :to="item.route"
+                  target="_blank"
+                  class="underline"
+                >
+                  {{ item.name }}
+                </router-link>
+                <span v-else>{{ item.name }}</span>
               </li>
             </ul>
           </div>
@@ -146,7 +171,12 @@
 </template>
 
 <script setup>
-import { confirmMatches, errorText, recordRoute } from '@/utils/erasureRequest'
+import {
+  confirmMatches,
+  errorText,
+  recordRoute,
+  unconfirmedMatchItems,
+} from '@/utils/erasureRequest'
 import { call, createResource, Dialog, toast } from 'frappe-ui'
 import { computed, reactive, ref, watch } from 'vue'
 
@@ -170,6 +200,9 @@ const preview = createResource({
   makeParams: () => ({ name: props.request }),
 })
 const data = computed(() => preview.data)
+const unconfirmed = computed(() =>
+  unconfirmedMatchItems(data.value?.unconfirmed_matches),
+)
 
 // Each kind that has something to remove, in the order the server lists them.
 const removedKinds = computed(() =>
