@@ -95,7 +95,7 @@ export function useCRMCommands() {
   const { emit } = useBroadcast()
   const { showModal } = useDoctypeModal()
   const { user } = sessionStore()
-  const { isManager } = usersStore()
+  const { isManager, isCompliance } = usersStore()
   const state = createSearchState()
   const context = {
     capture,
@@ -103,6 +103,7 @@ export function useCRMCommands() {
     showModal,
     user,
     isManager,
+    isCompliance,
     whatsappInstalled: isWhatsAppInstalled,
     state,
   }
@@ -123,15 +124,22 @@ function createSearchState() {
 }
 
 function buildCommands(context) {
-  const { capture, emit, showModal, isManager, whatsappInstalled, state } =
-    context
+  const {
+    capture,
+    emit,
+    showModal,
+    isManager,
+    isCompliance,
+    whatsappInstalled,
+    state,
+  } = context
   const tracked = trackWith(capture)
   return ordered([
     ...(commandPaletteQuery.value.trim()
       ? []
       : upcomingCommands(state.upcoming.value, tracked)),
     ...contextualCommands(tracked),
-    ...navigationCommands(tracked),
+    ...navigationCommands(tracked, isCompliance() || isManager()),
     ...createCommands(tracked, emit, showModal),
     ...settingsCommands(tracked, isManager, whatsappInstalled.value),
     ...(state.error.value ? [searchErrorCommand()] : []),
@@ -279,8 +287,8 @@ function contextualCommands(tracked) {
   )
 }
 
-function navigationCommands(tracked) {
-  return getNavigationItems().map((item) =>
+function navigationCommands(tracked, privacy) {
+  return getNavigationItems({ privacy }).map((item) =>
     tracked(
       {
         id: `navigate-${item.route}`,

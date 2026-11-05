@@ -139,6 +139,11 @@ export const usersStore = defineStore('crm-users', () => {
     return getUser(email).role === 'Sales Manager' || isAdmin(email)
   }
 
+  // Compliance is additive: its members also hold a Sales role.
+  function isCompliance(email) {
+    return Boolean(getUser(email).roles?.includes('Compliance'))
+  }
+
   function isWebsiteUser(email) {
     return getUser(email).user_type === 'Website User'
   }
@@ -172,6 +177,7 @@ export const usersStore = defineStore('crm-users', () => {
     getUser,
     isAdmin,
     isManager,
+    isCompliance,
     isSalesUser,
     isTelephonyAgent,
     getUserRole,

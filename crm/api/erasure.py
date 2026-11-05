@@ -323,6 +323,15 @@ def submit(name: str) -> str:
 
 
 @frappe.whitelist()
+def open_deals(name: str) -> list[str]:
+	"""The open deals that hold the request On Hold, for the banner on the request page.
+	Compliance and Sales Managers only."""
+	if not _has_full_access():
+		frappe.throw(_("You do not have access to this request."), frappe.PermissionError)
+	return open_deals_with_person(frappe.get_doc(REQUEST, name))
+
+
+@frappe.whitelist()
 def preview(name: str) -> dict:
 	"""What approving the request would remove and keep. Compliance only."""
 	_require_compliance()

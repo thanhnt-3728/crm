@@ -15,6 +15,7 @@ from crm.api.erasure import (
 	decline,
 	get_request,
 	list_requests,
+	open_deals,
 	preview,
 	submit,
 	update_matches,
@@ -358,6 +359,23 @@ class TestPrivacyAPI(IntegrationTestCase):
 		)
 		self.assertTrue(text)
 		self.assertIn(request.name, text)
+
+	def test_open_deals_lists_the_deals_holding_the_request(self):
+		_lead, contact, deal = make_person("marisol@x.net", "+19165550100", status="Open")
+		request = make_request(
+			status="On Hold",
+			logged_by=LOGGER,
+			matches=[{"reference_doctype": "Contact", "reference_name": contact.name, "confirmed": 1}],
+		)
+		frappe.set_user(COMPLIANCE)
+		self.assertEqual(open_deals(request.name), [deal.name])
+		frappe.set_user(MANAGER)
+		self.assertEqual(open_deals(request.name), [deal.name])
+
+	def test_open_deals_refused_for_the_logger(self):
+		request = make_request(status="On Hold", logged_by=LOGGER)
+		frappe.set_user(LOGGER)
+		self.assertRaises(frappe.PermissionError, open_deals, request.name)
 
 	# -- decline ---------------------------------------------------------------------------
 
