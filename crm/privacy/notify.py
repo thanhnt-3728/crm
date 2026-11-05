@@ -40,4 +40,11 @@ def notify(
 			}
 		).insert(ignore_permissions=True)
 
-	frappe.sendmail(recipients=users, subject=subject, message=message)
+	try:
+		frappe.sendmail(recipients=users, subject=subject, message=message)
+	except Exception:
+		# The CRM Notifications above stand. Fixed message: no traceback with locals.
+		frappe.log_error(
+			title="Privacy notification email failed",
+			message="Could not queue the email for a privacy notification; the in-app notifications were created.",
+		)

@@ -432,6 +432,25 @@ def _requester_values(request) -> set[str]:
 	return values
 
 
+@frappe.whitelist()
+def linked_emails(name: str) -> list[dict]:
+	"""The emails attached to the request (inbound mail from the requester while it is open):
+	subject and date, newest first. Compliance and Sales Managers only."""
+	if not _has_full_access():
+		frappe.throw(_("You do not have access to this request."), frappe.PermissionError)
+	if not frappe.db.exists(REQUEST, name):
+		frappe.throw(_("Request {0} does not exist.").format(name), frappe.DoesNotExistError)
+	names = _linked_communications(name)
+	if not names:
+		return []
+	return frappe.get_all(
+		"Communication",
+		filters={"name": ["in", names]},
+		fields=["name", "subject", "communication_date"],
+		order_by="communication_date desc",
+	)
+
+
 def _linked_communications(name: str) -> list[str]:
 	"""Emails attached to the request: inbound mail from the requester while it was open."""
 	linked = set(

@@ -1,4 +1,5 @@
 from datetime import date
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -6,6 +7,7 @@ from frappe.utils import add_days, add_months, getdate, today
 
 from crm.fcrm.doctype.crm_erasure_request.test_crm_erasure_request import make_request, make_user
 from crm.privacy import system_write
+from crm.privacy.notify import notify
 from crm.privacy.reminders import send_due_reminders
 from crm.privacy.retention import purge_expired
 from crm.privacy.setup import ensure_privacy_setup
@@ -202,3 +204,21 @@ class TestPrivacyReminders(IntegrationTestCase):
 		self.assertEqual(
 			frappe.db.get_value("Email Template", "Erasure outcome", "subject"), "Edited by an admin"
 		)
+
+	def test_failing_email_keeps_the_in_app_notifications(self):
+		r = make_request(received_on=add_days(NOW, -41))
+		with (
+			patch("crm.privacy.notify.frappe.sendmail", side_effect=Exception("smtp down")),
+			patch("crm.privacy.notify.frappe.log_error") as log_error,
+		):
+			notify(COMPLIANCE_USERS, "Erasure request test", "Body", request=r.name)
+		for user in COMPLIANCE_USERS:
+			self.assertEqual(notifications(user, r.name), ["Body"])
+		log_error.assert_called_once()
+		# A fixed message, nothing from the notification itself.
+		self.assertNotIn("Body", str(log_error.call_args))
+
+		# The reminder run still marks what it sent in the app.
+		with patch("crm.privacy.notify.frappe.sendmail", side_effect=Exception("smtp down")):
+			send_due_reminders(NOW)
+		self.assertTrue(frappe.db.get_value(REQUEST, r.name, "day40_alert_sent"))

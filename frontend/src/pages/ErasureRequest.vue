@@ -174,6 +174,36 @@
           @refresh="reload"
         />
 
+        <section
+          v-if="doc.status !== 'Closed' && canSeeEmails"
+          class="flex flex-col gap-2"
+        >
+          <div class="text-lg-medium text-ink-gray-9">
+            {{ __('Emails from the requester') }}
+          </div>
+          <div v-if="!emails.data?.length" class="text-base text-ink-gray-5">
+            {{
+              emails.loading
+                ? __('Loading...')
+                : __('No emails have arrived for this request.')
+            }}
+          </div>
+          <ul v-else class="divide-y text-base">
+            <li
+              v-for="email in emails.data"
+              :key="email.name"
+              class="flex items-center justify-between gap-3 py-1.5"
+            >
+              <span class="truncate text-ink-gray-9">
+                {{ email.subject || __('(no subject)') }}
+              </span>
+              <span class="shrink-0 text-sm text-ink-gray-5">
+                {{ date(email.communication_date) }}
+              </span>
+            </li>
+          </ul>
+        </section>
+
         <ErasureChecklistSection
           v-if="
             doc.status !== 'Closed' && (isCompliance() || doc.checklist?.length)
@@ -311,7 +341,14 @@ const request = createResource({
   onSuccess(data) {
     contractReferences.value = data.contract_references || ''
     loadHoldDeals(data)
+    loadEmails(data)
   },
+})
+
+// Inbound mail attached to the request, for Compliance and Sales Managers.
+const emails = createResource({
+  url: 'crm.api.erasure.linked_emails',
+  makeParams: () => ({ name: props.requestId }),
 })
 
 const doc = computed(() => request.data)
@@ -344,6 +381,7 @@ const canClose = computed(
     isCompliance() &&
     ['Erased', 'Declined'].includes(doc.value?.status),
 )
+const canSeeEmails = computed(() => isCompliance() || isManager())
 const canEditMatches = computed(
   () =>
     !restricted.value &&
@@ -376,6 +414,11 @@ async function loadHoldDeals(data) {
   } catch {
     // the banner still explains the hold without the list
   }
+}
+
+function loadEmails(data) {
+  if (!data.doctype || data.status === 'Closed' || !canSeeEmails.value) return
+  emails.reload()
 }
 
 async function submitRequest() {

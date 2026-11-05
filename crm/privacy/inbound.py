@@ -52,8 +52,9 @@ def on_communication_insert(doc, method=None) -> None:
 	"""Route mail from an erased person. Incoming mail is never rejected, since that would
 	break mailbox sync: any failure here is logged and the email is kept as it came.
 
-	While her request is open the email is attached to it. Otherwise, if her address is on
-	the do-not-contact list, it stays unlinked and Compliance is told to decide."""
+	While their request is open the email is attached to it and Compliance is told.
+	Otherwise, if the address is on the do-not-contact list, it stays unlinked and
+	Compliance is told to decide."""
 	try:
 		_route_communication(doc)
 	except Exception:
@@ -71,9 +72,15 @@ def _route_communication(doc) -> None:
 
 	request = _open_request_for(addresses)
 	if request:
-		doc.reference_doctype = REQUEST
-		doc.reference_name = request
-		doc.db_set({"reference_doctype": REQUEST, "reference_name": request}, update_modified=False)
+		attach_to_request(doc, request)
+		notify(
+			compliance_users(),
+			_("Email received for erasure request {0}").format(request),
+			_(
+				"An email arrived from the requester of erasure request {0}. It is attached to the request."
+			).format(request),
+			request=request,
+		)
 		return
 
 	if any(is_do_not_contact("Email", address) for address in addresses):
@@ -84,6 +91,28 @@ def _route_communication(doc) -> None:
 			reference_doctype="Communication",
 			reference_name=doc.name,
 		)
+
+
+def attach_to_request(doc, request: str) -> None:
+	"""Attach the email to the request without taking it off what it is already on: an
+	email that references a record (a reply on a lead's thread, say) gets a timeline link to
+	the request; one that references nothing gets the request as its reference. The request
+	finds both at close (`crm.api.erasure._linked_communications`)."""
+	if doc.reference_doctype == REQUEST and doc.reference_name == request:
+		return
+	if doc.reference_doctype and doc.reference_name:
+		if any(
+			link.link_doctype == REQUEST and link.link_name == request
+			for link in doc.get("timeline_links") or []
+		):
+			return
+		# Inserted as a row of its own: saving the email again here would run its hooks twice.
+		row = doc.append("timeline_links", {"link_doctype": REQUEST, "link_name": request})
+		row.db_insert()
+		return
+	doc.reference_doctype = REQUEST
+	doc.reference_name = request
+	doc.db_set({"reference_doctype": REQUEST, "reference_name": request}, update_modified=False)
 
 
 def on_whatsapp_insert(doc, method=None) -> None:

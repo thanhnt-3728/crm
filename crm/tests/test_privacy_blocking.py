@@ -6,6 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from crm.api.erasure import _linked_communications, linked_emails
 from crm.api.whatsapp import validate as validate_whatsapp_message
 from crm.fcrm.doctype.crm_erasure_request.test_crm_erasure_request import make_request, make_user
 from crm.lead_syncing.doctype.lead_sync_source.facebook import FacebookSyncSource
@@ -73,6 +74,7 @@ class TestPrivacyBlocking(IntegrationTestCase):
 		super().setUpClass()
 		ensure_privacy_setup()
 		make_user(COMPLIANCE_USER, ["Sales User", "Compliance"])
+		make_user("rep@example.com", ["Sales User"])
 
 	def setUp(self):
 		frappe.db.savepoint(SAVEPOINT)
@@ -211,6 +213,51 @@ class TestPrivacyBlocking(IntegrationTestCase):
 		)
 		self.assertFalse(frappe.db.exists("CRM Lead", {"email": ERASED}))
 		self.assertFalse(frappe.db.exists("CRM Notification", {"reference_name": email.name}))
+		# Compliance is told once, on the request (where the notification opens).
+		notices = frappe.get_all(
+			"CRM Notification",
+			filters={
+				"to_user": COMPLIANCE_USER,
+				"type": "Privacy",
+				"reference_doctype": "CRM Erasure Request",
+				"reference_name": request.name,
+			},
+			fields=["notification_text", "message"],
+		)
+		self.assertEqual(len(notices), 1)
+		self.assertIn(request.name, notices[0].notification_text)
+		self.assertNotIn("marisol", (notices[0].message or "").lower())
+		self.assertEqual(_linked_communications(request.name), [email.name])
+
+	def test_inbound_email_on_a_record_keeps_it_and_links_the_request(self):
+		"""A reply on a lead's thread stays on the lead (and in its views): the request gets
+		a timeline link instead."""
+		lead = make_lead(email="someone.else@x.net")
+		request = make_request(identifiers=[{"kind": "Email", "value": ERASED}])
+		email = make_email(
+			"Marisol <MARISOL@x.net>", reference_doctype="CRM Lead", reference_name=lead.name
+		).insert(ignore_permissions=True)
+
+		email.reload()
+		self.assertEqual((email.reference_doctype, email.reference_name), ("CRM Lead", lead.name))
+		self.assertEqual(
+			[
+				(row.link_doctype, row.link_name)
+				for row in email.timeline_links
+				if row.link_doctype == "CRM Erasure Request"
+			],
+			[("CRM Erasure Request", request.name)],
+		)
+		self.assertEqual(_linked_communications(request.name), [email.name])
+
+		# Both kinds are listed on the request page for Compliance and Sales Managers.
+		direct = make_email(ERASED, subject="Second").insert(ignore_permissions=True)
+		frappe.set_user(COMPLIANCE_USER)
+		listed = linked_emails(request.name)
+		self.assertEqual({row.name for row in listed}, {email.name, direct.name})
+		self.assertEqual(set(listed[0]), {"name", "subject", "communication_date"})
+		frappe.set_user("rep@example.com")
+		self.assertRaises(frappe.PermissionError, linked_emails, request.name)
 
 	def test_excluded_identifier_is_not_matched(self):
 		make_request(identifiers=[{"kind": "Email", "value": "office@x.net", "excluded": 1}])
