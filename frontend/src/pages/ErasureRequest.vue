@@ -233,7 +233,7 @@
         <section
           v-if="
             doc.status !== 'Closed' &&
-            (isCompliance() || doc.contract_references)
+            (canEditContractReferences || doc.contract_references)
           "
         >
           <div class="mb-1 text-lg-medium text-ink-gray-9">
@@ -247,7 +247,7 @@
             }}
           </div>
           <FormControl
-            v-if="isCompliance()"
+            v-if="canEditContractReferences"
             v-model="contractReferences"
             type="textarea"
             :rows="3"
@@ -404,6 +404,12 @@ const canReset = computed(
   () => !restricted.value && canResetStuck(doc.value, isCompliance()),
 )
 const canSeeEmails = computed(() => isCompliance() || isManager())
+// The server refuses Compliance edits to the request's details once it is approved.
+const canEditContractReferences = computed(
+  () =>
+    isCompliance() &&
+    ['Logged', 'Awaiting Sign-off', 'On Hold'].includes(doc.value?.status),
+)
 const canEditMatches = computed(
   () =>
     !restricted.value &&
