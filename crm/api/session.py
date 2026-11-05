@@ -1,7 +1,7 @@
 import frappe
 from frappe import _
 
-CRM_ALLOWED_ROLES = ["System Manager", "Sales Manager", "Sales User"]
+CRM_ALLOWED_ROLES = ["System Manager", "Sales Manager", "Sales User", "Compliance"]
 
 
 def get_session_role_flags():
@@ -12,6 +12,7 @@ def get_session_role_flags():
 
 	return {
 		"is_system_manager": "System Manager" in roles,
+		"is_compliance": "Compliance" in roles,
 		"is_sales_manager": "Sales Manager" in roles and "System Manager" not in roles,
 		"is_sales_user": "Sales User" in roles
 		and "Sales Manager" not in roles
