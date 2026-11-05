@@ -1,0 +1,20 @@
+#revops-product
+[09:12] Priya Nair: Morning! Moving the erasure thing out of email so we can decide. Context: a former lead in California asked us to delete all her data (Dana's email has the details). Today we basically can't.
+[09:14] Tyler Brandt: yeah I went to delete her lead and stopped bc she's also on 2 deals from last spring (one is still sitting in Negotiation) + a bunch of my emails with her 😬
+[09:15] Sam Kowalczyk: if we just delete the lead, her stuff on those deals stays put. it's not one record, it's spread all over
+[09:17] Priya Nair: Which is why I don't want us doing this by hand every time. Let's build it into the CRM properly.
+[09:18] Dana Okafor: +1. This won't be the only one, B2B contacts have been covered since 2023.
+[09:20] Tyler Brandt: whatever we build, these come to us reps first. she emailed ME. I should be able to log it right from her lead, not file a ticket somewhere
+  ↳ [09:21] Priya Nair: Agreed. Whoever receives the request logs it in the CRM on the person's behalf.
+[09:23] Sam Kowalczyk: scope q: does "her data" include the company? Sierra Foothills Dental still exists as an org in the CRM
+  ↳ [09:24] Dana Okafor: No. It's about the person. Company records stay.
+[09:26] Tyler Brandt: ok so once it's logged can I just hit the button myself? faster that way
+[09:27] Dana Okafor: I'd rather not. One person shouldn't be able to wipe someone out of the CRM on their own. Someone else has to sign off.
+  ↳ [09:28] Priya Nair: Agreed: a rep never erases records alone.
+[09:31] Priya Nair: One more constraint from Finance: Marcus asked me yesterday, pipeline and revenue numbers must not move when we erase someone. The board deck pulls straight from those reports.
+[09:33] Sam Kowalczyk: unrelated but is anyone else's CRM slow this morning? kanban & list views took like 10s to load
+  ↳ [09:34] Tyler Brandt: same, thought it was my wifi lol
+[09:38] Sam Kowalczyk: back on topic. backups? we keep 35 days of nightly backups
+  ↳ [09:40] Dana Okafor: Leave backups out of this. If an old backup ever gets loaded again, our existing backup procedure handles it.
+[09:42] Priya Nair: Great. I'll write this up. Sam, can your team pick it up in November?
+  ↳ [09:43] Sam Kowalczyk: yep, let's do it 👍

@@ -1,0 +1,42 @@
+From: Marisol Vega <marisol.vega@example.net>
+To: Tyler Brandt <tyler.brandt@example.com>
+Cc:
+Date: Mon, 26 Oct 2026 08:47
+Subject: Please delete my personal information
+
+Hi Tyler,
+
+I left Sierra Foothills Dental Group at the end of August, so I won't be moving forward with Northpine. I'm a California resident, and under the CCPA I'm asking Northpine to delete all personal information you hold about me.
+
+Thanks for all your help over the past year, you were always easy to work with.
+
+Best,
+Marisol Vega
+---
+From: Tyler Brandt <tyler.brandt@example.com>
+To: Dana Okafor <dana.okafor@example.com>
+Cc: Priya Nair <priya.nair@example.com>
+Date: Mon, 26 Oct 2026 10:05
+Subject: Fwd: Please delete my personal information
+
+Dana, got this from a former lead this morning (Marisol Vega, Sierra Foothills Dental). Can I just delete her lead in the CRM, or is there something else we need to do? Haven't touched anything yet.
+
+Tyler
+---
+From: Dana Okafor <dana.okafor@example.com>
+To: Tyler Brandt <tyler.brandt@example.com>
+Cc: Priya Nair <priya.nair@example.com>, Sam Kowalczyk <sam.kowalczyk@example.com>
+Date: Mon, 26 Oct 2026 14:30
+Subject: Re: Fwd: Please delete my personal information
+
+Thanks Tyler, please don't delete anything yet.
+
+Quick summary for everyone: she's a California resident, and since January 2023 the CCPA covers business contacts too, so this is a valid request and we have to act on it.
+
+Two dates matter:
+- We must confirm we received the request within 10 business days, so by Nov 9. I'll send that today.
+- We must respond within 45 calendar days of receiving it, so by Dec 10.
+
+Priya, I doubt this is the last one we'll get. Can we talk tomorrow about doing this properly in the CRM? I'll join your channel.
+
+Dana
