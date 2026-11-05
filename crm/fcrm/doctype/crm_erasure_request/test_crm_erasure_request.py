@@ -43,7 +43,10 @@ def make_request(**values):
 	logged_by = values.pop("logged_by", None)
 	doc = frappe.get_doc(
 		{"doctype": "CRM Erasure Request", "channel": "Email", "received_on": today(), **values}
-	).insert(ignore_permissions=True)
+	)
+	# Tests set up states a user could not: insert as the system.
+	with system_write():
+		doc.insert(ignore_permissions=True)
 	if logged_by:
 		doc.db_set("logged_by", logged_by)
 	return doc
@@ -138,6 +141,49 @@ class TestCRMErasureRequest(IntegrationTestCase):
 			r = make_request()
 			r.set(fieldname, value)
 			self.assertRaises(frappe.ValidationError, r.save)
+
+	def test_user_insert_cannot_set_system_fields(self):
+		frappe.set_user("rep@example.com")
+		r = frappe.get_doc(
+			{
+				"doctype": "CRM Erasure Request",
+				"channel": "Email",
+				"received_on": today(),
+				"status": "Erased",
+				"approved_by": "comp2@example.com",
+				"approved_on": "2026-11-01 10:00:00",
+				"erased_on": "2026-11-01 10:00:00",
+				"delete_after": "2028-11-01",
+				"day30_reminder_sent": 1,
+			}
+		).insert()
+		self.assertEqual(r.status, "Logged")
+		self.assertFalse(r.approved_by)
+		self.assertFalse(r.approved_on)
+		self.assertFalse(r.erased_on)
+		self.assertFalse(r.delete_after)
+		self.assertFalse(r.day30_reminder_sent)
+		self.assertEqual(r.logged_by, "rep@example.com")
+
+	def test_client_round_trip_is_not_a_change(self):
+		r = make_request(received_on="2026-10-26")
+		with system_write():
+			r.approved_by = "comp2@example.com"
+			r.approved_on = "2026-11-02 09:30:00"
+			r.erased_on = "2026-11-02 09:31:00"
+			r.delete_after = "2028-11-02"
+			r.save()
+
+		frappe.set_user("comp1@example.com")
+		# What a client sends back: dates as strings, unset values as "", unticked checks as None.
+		data = frappe.get_doc("CRM Erasure Request", r.name).as_dict(convert_dates_to_str=True)
+		data["erasure_error"] = ""
+		data["ack_reminder_sent"] = None
+		data["day30_reminder_sent"] = None
+		doc = frappe.get_doc(data)
+		doc.save()
+		self.assertEqual(str(doc.acknowledge_by), "2026-11-09")
+		self.assertEqual(doc.approved_by, "comp2@example.com")
 
 	def test_system_write_allows_status(self):
 		r = make_request()

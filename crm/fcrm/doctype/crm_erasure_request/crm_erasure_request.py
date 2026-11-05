@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import getdate, now_datetime
+from frappe.utils import cint, cstr, get_datetime, getdate, now_datetime
 
 from crm.privacy.deadlines import acknowledge_by, respond_by
 
@@ -78,6 +78,15 @@ class CRMErasureRequest(Document):
 		# Always the real session user: the approval rule ("not the logger") depends on it.
 		self.logged_by = frappe.session.user
 
+		# A user can only open a request in `Logged`; the system fields start blank.
+		if not frappe.flags.privacy_system_write:
+			self.status = "Logged"
+			for fieldname in PROTECTED_FIELDS:
+				if fieldname in ("status", "logged_by", "acknowledge_by", "respond_by"):
+					continue  # status set above; the rest are stamped or recomputed
+				df = self.meta.get_field(fieldname)
+				self.set(fieldname, 0 if df.fieldtype == "Check" else None)
+
 	def validate(self):
 		self.reject_protected_field_changes()
 		self.set_deadlines()
@@ -88,10 +97,26 @@ class CRMErasureRequest(Document):
 		if self.is_new() or frappe.flags.privacy_system_write:
 			return
 		for fieldname in PROTECTED_FIELDS:
-			if self.has_value_changed(fieldname):
+			if self._protected_field_changed(fieldname):
 				frappe.throw(
 					_("{0} can only be changed by the system.").format(self.meta.get_label(fieldname))
 				)
+
+	def _protected_field_changed(self, fieldname: str) -> bool:
+		"""Compare by field type: a client sends dates as strings, unset values as "" and
+		unticked checks as None, none of which is a change."""
+		before = self.get_doc_before_save()
+		if before is None:
+			return False
+		fieldtype = self.meta.get_field(fieldname).fieldtype
+		old, new = before.get(fieldname), self.get(fieldname)
+		if fieldtype == "Date":
+			return (getdate(old) if old else None) != (getdate(new) if new else None)
+		if fieldtype == "Datetime":
+			return (get_datetime(old) if old else None) != (get_datetime(new) if new else None)
+		if fieldtype == "Check":
+			return cint(old) != cint(new)
+		return cstr(old) != cstr(new)
 
 	def set_deadlines(self):
 		received = getdate(self.received_on)
