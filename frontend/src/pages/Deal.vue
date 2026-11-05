@@ -121,6 +121,12 @@
             />
 
             <Button
+              :tooltip="__('Request erasure')"
+              icon="lucide-user-x"
+              @click="showErasureModal = true"
+            />
+
+            <Button
               v-if="canDelete"
               :tooltip="__('Delete')"
               variant="subtle"
@@ -347,9 +353,16 @@
     doctype="CRM Deal"
     :document="document"
   />
+  <LogErasureRequestModal
+    v-if="showErasureModal"
+    v-model="showErasureModal"
+    start-doctype="CRM Deal"
+    :start-name="dealId"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
+import LogErasureRequestModal from '@/components/Modals/LogErasureRequestModal.vue'
 import ErrorPage from '@/components/ErrorPage.vue'
 import Icon from '@/components/Icon.vue'
 import Resizer from '@/components/Resizer.vue'
@@ -444,6 +457,7 @@ const props = defineProps({
 const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
+const showErasureModal = ref(false)
 
 const {
   triggerOnChange,
@@ -584,6 +598,7 @@ function dealCommands() {
     ...dealCommunicationCommands(),
   ]
   commands.push(...dealScriptCommands())
+  commands.push(erasureCommand())
   if (canDelete.value) commands.push(deleteDealCommand())
   return commands
 }
@@ -732,6 +747,17 @@ function dealScriptCommands() {
       icon: action.icon || 'zap',
       perform: () => action.onClick(() => {}),
     }))
+}
+
+function erasureCommand() {
+  return {
+    id: 'deal-request-erasure',
+    title: 'Request erasure',
+    group: 'Deal',
+    icon: 'user-x',
+    keywords: 'privacy delete personal data ccpa',
+    perform: () => (showErasureModal.value = true),
+  }
 }
 
 function deleteDealCommand() {

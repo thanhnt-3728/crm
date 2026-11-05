@@ -12,7 +12,6 @@
     </template>
     <template #right-header>
       <Button
-        v-if="LogErasureRequestModal"
         variant="solid"
         :label="__('Log request')"
         iconLeft="lucide-plus"
@@ -105,15 +104,12 @@
     </table>
   </div>
 
-  <component
-    :is="LogErasureRequestModal"
-    v-if="LogErasureRequestModal"
-    v-model="showLogModal"
-  />
+  <LogErasureRequestModal v-if="showLogModal" v-model="showLogModal" />
 </template>
 
 <script setup>
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import LogErasureRequestModal from '@/components/Modals/LogErasureRequestModal.vue'
 import LucideShieldCheck from '~icons/lucide/shield-check'
 import { formatDate } from '@/utils'
 import {
@@ -124,22 +120,12 @@ import {
   urgencyTheme,
 } from '@/utils/erasureRequest'
 import { Breadcrumbs, createResource } from 'frappe-ui'
-import { computed, defineAsyncComponent, markRaw, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const showClosed = ref(false)
 const showLogModal = ref(false)
-
-// The log-request modal ships with the record actions. The button only shows
-// once that file exists, so this page doesn't depend on it to build.
-const logModals = import.meta.glob(
-  '../components/Modals/LogErasureRequestModal.vue',
-)
-const logModalLoader = Object.values(logModals)[0]
-const LogErasureRequestModal = logModalLoader
-  ? markRaw(defineAsyncComponent(logModalLoader))
-  : null
 
 const requests = createResource({
   url: 'crm.api.erasure.list_requests',

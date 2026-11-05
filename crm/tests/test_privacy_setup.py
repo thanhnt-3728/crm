@@ -69,3 +69,22 @@ class TestPrivacySetup(IntegrationTestCase):
 		notify([NOTIFIED_USER], "Subject", "Body", request="PDR-0001")
 		self.assertTrue(frappe.db.exists("CRM Notification", {"to_user": NOTIFIED_USER, "type": "Privacy"}))
 		self.assertTrue(frappe.db.exists("Email Queue", {"message": ["like", "%Body%"]}))
+
+	def test_personal_field_must_exist_on_its_document_type(self):
+		settings = frappe.get_doc("CRM Privacy Settings")
+		settings.append("personal_fields", {"document_type": "CRM Lead", "fieldname": "emial"})
+		self.assertRaises(frappe.ValidationError, settings.validate)
+
+	def test_personal_field_on_existing_field_is_accepted(self):
+		settings = frappe.get_doc("CRM Privacy Settings")
+		settings.append("personal_fields", {"document_type": "Contact", "fieldname": "email_id"})
+		settings.validate()
+
+	def test_personal_field_needs_both_parts(self):
+		settings = frappe.get_doc("CRM Privacy Settings")
+		settings.append("personal_fields", {"document_type": "CRM Lead", "fieldname": ""})
+		self.assertRaises(frappe.ValidationError, settings.validate)
+
+	def test_default_personal_fields_all_exist(self):
+		# the seeded list must pass the same check, or install would fail
+		frappe.get_doc("CRM Privacy Settings").validate()

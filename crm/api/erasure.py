@@ -506,3 +506,51 @@ def close(name: str, answered_on: str, outcome: str, denial_reason: str = "") ->
 	_wipe_comments(name)
 	_save_as_system(request, ignore_version=True)
 	frappe.db.delete("Version", {"ref_doctype": REQUEST, "docname": name})
+
+
+# -- Privacy settings --------------------------------------------------------------------
+
+
+def _settings_doc(permission: str):
+	doc = frappe.get_doc("CRM Privacy Settings")
+	doc.check_permission(permission)
+	return doc
+
+
+@frappe.whitelist()
+def get_privacy_settings() -> dict:
+	"""The settings the Privacy page edits. The hash secret is never part of it."""
+	doc = _settings_doc("read")
+	return {
+		"head_of_compliance": doc.head_of_compliance,
+		"contract_retention_months": cint(doc.contract_retention_months),
+		"personal_fields": [
+			{"document_type": row.document_type, "fieldname": row.fieldname} for row in doc.personal_fields
+		],
+	}
+
+
+@frappe.whitelist()
+def save_privacy_settings(
+	head_of_compliance: str | None = None,
+	contract_retention_months: int = 0,
+	personal_fields: list[dict] | None = None,
+) -> dict:
+	"""Save the Head of Compliance, the contract retention period and the personal fields.
+	Each field must exist on its document type. Only people who may write the settings can
+	do this; the stored hash secret is left as it is."""
+	doc = _settings_doc("write")
+	months = cint(contract_retention_months)
+	if months < 0:
+		frappe.throw(_("The retention period cannot be negative."))
+
+	doc.head_of_compliance = head_of_compliance or None
+	doc.contract_retention_months = months
+	doc.set("personal_fields", [])
+	for row in personal_fields or []:
+		doc.append(
+			"personal_fields",
+			{"document_type": row.get("document_type"), "fieldname": (row.get("fieldname") or "").strip()},
+		)
+	doc.save()
+	return get_privacy_settings()

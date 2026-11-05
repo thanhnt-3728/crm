@@ -22,4 +22,6 @@ class CRMPrivacySettings(Document):
 		personal_fields: DF.Table[CRMPersonalField]
 	# end: auto-generated types
 
-	pass
+	def validate(self):
+		for row in self.personal_fields:
+			row.validate_fieldname()

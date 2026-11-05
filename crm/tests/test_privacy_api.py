@@ -13,10 +13,12 @@ from crm.api.erasure import (
 	close,
 	create_request,
 	decline,
+	get_privacy_settings,
 	get_request,
 	list_requests,
 	open_deals,
 	preview,
+	save_privacy_settings,
 	submit,
 	update_matches,
 )
@@ -541,3 +543,43 @@ class TestPrivacyAPI(IntegrationTestCase):
 		frappe.set_user(COMPLIANCE)
 		self.assertRaises(frappe.ValidationError, close, r.name, today(), "Whatever")
 		self.assertRaises(frappe.ValidationError, close, r.name, "", "Completed")
+
+	# -- privacy settings ------------------------------------------------------------------
+
+	def test_privacy_settings_never_return_the_hash_secret(self):
+		frappe.set_user(COMPLIANCE)
+		result = get_privacy_settings()
+		self.assertEqual(set(result), {"head_of_compliance", "contract_retention_months", "personal_fields"})
+		self.assertNotIn("hash_secret", str(result))
+
+	def test_save_privacy_settings_replaces_fields_and_keeps_secret(self):
+		secret = frappe.get_single("CRM Privacy Settings").get_password("hash_secret")
+		frappe.set_user(COMPLIANCE)
+		saved = save_privacy_settings(
+			head_of_compliance=COMPLIANCE,
+			contract_retention_months=36,
+			personal_fields=[{"document_type": "CRM Lead", "fieldname": "email"}],
+		)
+		self.assertEqual(saved["head_of_compliance"], COMPLIANCE)
+		self.assertEqual(saved["contract_retention_months"], 36)
+		self.assertEqual(saved["personal_fields"], [{"document_type": "CRM Lead", "fieldname": "email"}])
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.get_single("CRM Privacy Settings").get_password("hash_secret"), secret)
+
+	def test_save_privacy_settings_rejects_a_field_that_does_not_exist(self):
+		frappe.set_user(COMPLIANCE)
+		self.assertRaises(
+			frappe.ValidationError,
+			save_privacy_settings,
+			personal_fields=[{"document_type": "CRM Lead", "fieldname": "emial"}],
+		)
+
+	def test_save_privacy_settings_rejects_negative_retention(self):
+		frappe.set_user(COMPLIANCE)
+		self.assertRaises(frappe.ValidationError, save_privacy_settings, contract_retention_months=-1)
+
+	def test_privacy_settings_are_closed_to_other_users(self):
+		for user in (LOGGER, MANAGER):
+			frappe.set_user(user)
+			self.assertRaises(frappe.PermissionError, get_privacy_settings)
+			self.assertRaises(frappe.PermissionError, save_privacy_settings)

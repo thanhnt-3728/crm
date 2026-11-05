@@ -100,6 +100,12 @@
                   @click="callEnabled && makeCall(contact.doc.mobile_no)"
                 />
                 <Button
+                  :label="__('Request erasure')"
+                  size="sm"
+                  iconLeft="lucide-user-x"
+                  @click="showErasureModal = true"
+                />
+                <Button
                   v-if="canDelete"
                   :label="__('Delete')"
                   theme="red"
@@ -175,6 +181,12 @@
     v-model="showDealModal"
     :defaults="dealDefaults"
   />
+  <LogErasureRequestModal
+    v-if="showErasureModal"
+    v-model="showErasureModal"
+    start-doctype="Contact"
+    :start-name="contact.doc.name"
+  />
 </template>
 
 <script setup>
@@ -188,6 +200,8 @@ import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import DealsIcon from '@/components/Icons/DealsIcon.vue'
 import DealsListView from '@/components/ListViews/DealsListView.vue'
 import DealModal from '@/components/Modals/DealModal.vue'
+import LogErasureRequestModal from '@/components/Modals/LogErasureRequestModal.vue'
+import { useCommandPaletteContext } from '@/composables/useCommandPalette'
 import CustomActions from '@/components/CustomActions.vue'
 import { validateIsImageFile, setupCustomizations } from '@/utils'
 import { useContactFields } from '@/composables/useContactFields'
@@ -293,6 +307,18 @@ usePageMeta(() => {
   }
 })
 const showDeleteLinkedDocModal = ref(false)
+const showErasureModal = ref(false)
+
+useCommandPaletteContext(() => [
+  {
+    id: 'contact-request-erasure',
+    title: 'Request erasure',
+    group: 'Contact',
+    icon: 'user-x',
+    keywords: 'privacy delete personal data ccpa',
+    perform: () => (showErasureModal.value = true),
+  },
+])
 const showDealModal = ref(false)
 const dealDefaults = ref({})
 

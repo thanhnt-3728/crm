@@ -50,6 +50,11 @@
         v-if="document.actions?.length"
         :actions="document.actions"
       />
+      <Button
+        :tooltip="__('Request erasure')"
+        icon="lucide-user-x"
+        @click="showErasureModal = true"
+      />
       <Tooltip
         :disabled="!isLeadConversionDisabled"
         :text="__('Cannot convert a lost lead to deal')"
@@ -130,9 +135,16 @@
     doctype="CRM Lead"
     :document="document"
   />
+  <LogErasureRequestModal
+    v-if="showErasureModal"
+    v-model="showErasureModal"
+    start-doctype="CRM Lead"
+    :start-name="leadId"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
+import LogErasureRequestModal from '@/components/Modals/LogErasureRequestModal.vue'
 import ErrorPage from '@/components/ErrorPage.vue'
 import Icon from '@/components/Icon.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
@@ -192,6 +204,7 @@ const props = defineProps({
 const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
+const showErasureModal = ref(false)
 
 const {
   triggerOnChange,

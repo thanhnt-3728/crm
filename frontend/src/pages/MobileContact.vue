@@ -76,6 +76,12 @@
                   @click="callEnabled && makeCall(contact.doc.mobile_no)"
                 />
                 <Button
+                  :label="__('Request erasure')"
+                  size="sm"
+                  icon-left="lucide-user-x"
+                  @click="showErasureModal = true"
+                />
+                <Button
                   v-if="canDelete"
                   :label="__('Delete')"
                   theme="red"
@@ -148,6 +154,12 @@
       </template>
     </Tabs>
   </div>
+  <LogErasureRequestModal
+    v-if="showErasureModal"
+    v-model="showErasureModal"
+    start-doctype="Contact"
+    :start-name="contact.doc.name"
+  />
 </template>
 
 <script setup>
@@ -159,6 +171,7 @@ import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import DealsIcon from '@/components/Icons/DealsIcon.vue'
 import DealsListView from '@/components/ListViews/DealsListView.vue'
+import LogErasureRequestModal from '@/components/Modals/LogErasureRequestModal.vue'
 import { validateIsImageFile } from '@/utils'
 import { useContactFields } from '@/composables/useContactFields'
 import { timestampCell } from '@/composables/useTimelinePreferences'
@@ -210,6 +223,7 @@ const {
 } = useDocument('Contact', props.contactId)
 
 const canDelete = computed(() => permissions.data?.permissions?.delete || false)
+const showErasureModal = ref(false)
 
 const transformField = useContactFields(contact)
 
