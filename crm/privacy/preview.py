@@ -50,6 +50,8 @@ class Targets:
 	comments: list[str] = field(default_factory=list)
 	files: list[str] = field(default_factory=list)
 	wa_messages: list[str] = field(default_factory=list)
+	# WhatsApp profiles (one per chat partner number) of the active phones: deleted.
+	wa_profiles: list[str] = field(default_factory=list)
 	recordings_present: bool = False
 	# Filled in by `erase_records`: {old name: new name} of the contacts and addresses it
 	# renamed, so later steps can find the old names in history.
@@ -170,10 +172,10 @@ def collect_targets(request) -> Targets:
 			"reference_docname",
 			{"CRM Lead": targets.leads, "CRM Deal": targets.deals_still_on},
 		)
-		profiles = wa_profiles_matching(phones)
-		if profiles:
+		targets.wa_profiles = _sorted(wa_profiles_matching(phones))
+		if targets.wa_profiles:
 			wa_messages.update(
-				frappe.get_all("WA Message", filters={"to": ["in", sorted(profiles)]}, pluck="name")
+				frappe.get_all("WA Message", filters={"to": ["in", targets.wa_profiles]}, pluck="name")
 			)
 		targets.wa_messages = _sorted(wa_messages)
 
@@ -212,6 +214,7 @@ KINDS = {
 	"Comment": ("Comment", "comments", ("content",)),
 	"File": ("File", "files", ("file_name",)),
 	"WhatsApp": ("WA Message", "wa_messages", ()),
+	"WhatsApp profile": ("WA Profile", "wa_profiles", ("phone_number",)),
 }
 
 

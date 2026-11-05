@@ -394,17 +394,21 @@ def scrub_version_data(
 	"""A copy of a Version's `data` with the values of personal `fields` replaced by
 	`placeholder`. `tables` maps a child table fieldname to the personal fields of its rows,
 	scrubbed in `added`, `removed` and `row_changed` entries. `renames` maps old record names
-	to new ones: any value exactly equal to an old name (a link to a renamed contact, say)
+	to new ones: a value exactly equal to an old name (a link to a renamed contact, say)
 	becomes the new name. Other changes are kept.
 
-	Without `matcher` every personal value is replaced (the history of the person's own
-	records). With one, only the person's data is (a record shared with others): a value
-	when `matcher.value(fieldname, value)`, a whole table row when `matcher.row(row_dict)`
-	or, for `row_changed`, `matcher.row_name(row_name)`; in other rows only the values
-	`matcher.value` accepts."""
+	Without `matcher` every personal value is replaced and every old name renamed (the
+	history of the person's own records). With one, only the person's data is (a record
+	shared with others): a value when `matcher.value(fieldname, value)`, a whole table row
+	when `matcher.row(row_dict)` or, for `row_changed`, `matcher.row_name(row_name)`; in
+	other rows only the values `matcher.value` accepts. A matcher whose `names` is off is
+	for a record not tied to the person: old names are then renamed only inside the
+	person's rows, so a value that merely equals her old contact name (a namesake's lead
+	name) is left alone."""
 	tables = tables or {}
 	is_hers = matcher.value if matcher else None
-	out = _rename_values(data, renames) if renames else deepcopy(data)
+	rename_all = bool(renames) and (matcher is None or getattr(matcher, "names", True))
+	out = _rename_values(data, renames) if rename_all else deepcopy(data)
 	if "changed" in out:
 		out["changed"] = _scrub_changes(out["changed"], fields, placeholder, is_hers)
 
@@ -414,6 +418,8 @@ def scrub_version_data(
 			if len(entry) == 2 and entry[0] in tables and isinstance(entry[1], dict):
 				row = entry[1]
 				whole_row = matcher is None or matcher.row(row)
+				if whole_row and renames and not rename_all:
+					entry[1] = row = _rename_values(row, renames)
 				for fieldname in tables[entry[0]]:
 					if row.get(fieldname) and (whole_row or is_hers(fieldname, row[fieldname])):
 						row[fieldname] = placeholder
@@ -422,6 +428,8 @@ def scrub_version_data(
 		# [table fieldname, row index, row name, [[fieldname, old, new], ...]]
 		if len(entry) == 4 and entry[0] in tables:
 			whole_row = matcher is None or matcher.row_name(entry[2])
+			if whole_row and renames and not rename_all:
+				entry[3] = _rename_values(entry[3], renames)
 			entry[3] = _scrub_changes(entry[3], tables[entry[0]], placeholder, None if whole_row else is_hers)
 	return out
 
@@ -434,15 +442,23 @@ def _version_tables(doctype: str) -> dict[str, set[str]]:
 
 
 class _DealVersionMatcher:
-	"""Tells the person's data apart from other people's in a shared deal's history."""
+	"""Tells the person's data apart from other people's in a shared record's history.
 
-	def __init__(self, person: _Person, contacts: set[str], rows: set[str]):
+	With `names` off, a value counts as hers only when it is her email or phone: for
+	records not tied to her, where a name equal to one of hers may well be a namesake's.
+	Her table rows are still told apart by their contact, email or phone."""
+
+	def __init__(self, person: _Person, contacts: set[str], rows: set[str], names: bool = True):
 		self.person = person
 		self.contacts = contacts  # the person's contact names, old and new
 		self.rows = rows  # names of the person's contacts rows on the deal
+		self.names = names
 
 	def value(self, fieldname: str, value) -> bool:
-		return _value_is_persons(_kind_of(fieldname), value, self.person)
+		kind = _kind_of(fieldname)
+		if kind == "Text" and not self.names:
+			return False
+		return _value_is_persons(kind, value, self.person)
 
 	def row(self, row: dict) -> bool:
 		return row.get("name") in self.rows or _is_person_row(row, self.contacts, self.person)
@@ -763,13 +779,48 @@ def _erase(request) -> None:
 		request.save(ignore_permissions=True)
 
 
+def _fail(request_name: str, error: Exception) -> None:
+	"""Undo the erasure and put the request back for sign-off with the error."""
+	from crm.privacy import erasure_content
+
+	frappe.db.rollback()
+	# A rollback to a savepoint would leave the after-commit work queued: make it inert.
+	erasure_content.cancel_after_commit_work()
+	failed = frappe.get_doc(REQUEST, request_name)
+	failed.status = "Awaiting Sign-off"
+	failed.erasure_error = str(error) or type(error).__name__
+	with system_write():
+		failed.save(ignore_permissions=True)
+	frappe.db.commit()
+
+
+def _commit(request_name: str) -> None:
+	"""Commit the erasure. Frappe runs after-commit callbacks once the SQL commit is done;
+	if one of them fails, the erasure stands: the error is logged and the erasure's own
+	file removal and re-indexing still run. Raises only when nothing was committed."""
+	from crm.privacy import erasure_content
+
+	try:
+		frappe.db.commit()
+		return
+	except Exception:
+		frappe.db.rollback()
+		if frappe.db.get_value(REQUEST, request_name, "status") != "Erased":
+			raise  # the commit itself failed
+	frappe.log_error(title=f"Erasure {request_name}: a step after the commit failed")
+	erasure_content.run_after_commit_work()
+
+
 def run_erasure(request_name: str) -> None:
 	"""The background job that carries out an approved request, all or nothing.
 
 	On success the request is `Erased` and everything is committed; files leave the disk
-	and the search index is updated only after that commit. On any error the whole erasure
-	is rolled back, the request goes back to `Awaiting Sign-off` with the error in
-	`erasure_error`, and the error is raised again for the job log."""
+	and the search index is updated only after that commit. On any error before the commit
+	the whole erasure is rolled back, the request goes back to `Awaiting Sign-off` with the
+	error in `erasure_error`, and the error is raised again for the job log. An error after
+	the commit is only logged: the erasure is done."""
+	from crm.privacy import erasure_content
+
 	request = frappe.get_doc(REQUEST, request_name)
 	if request.status != "Erasing":
 		frappe.throw(
@@ -780,17 +831,12 @@ def run_erasure(request_name: str) -> None:
 	# Lets the job add the Twilio checklist item, which only Compliance may otherwise do.
 	frappe.flags.in_erasure_job = True
 	try:
-		try:
-			_erase(request)
-			frappe.db.commit()
-		except Exception as e:
-			frappe.db.rollback()
-			failed = frappe.get_doc(REQUEST, request_name)
-			failed.status = "Awaiting Sign-off"
-			failed.erasure_error = str(e) or type(e).__name__
-			with system_write():
-				failed.save(ignore_permissions=True)
-			frappe.db.commit()
-			raise
+		with erasure_content.tracked_after_commit_work():
+			try:
+				_erase(request)
+				_commit(request_name)
+			except Exception as e:
+				_fail(request_name, e)
+				raise
 	finally:
 		frappe.flags.in_erasure_job = previous

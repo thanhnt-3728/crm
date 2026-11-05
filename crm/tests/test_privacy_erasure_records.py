@@ -235,6 +235,42 @@ class TestPrivacyErasureRecords(IntegrationTestCase):
 		self.assertEqual(out["removed"][0][1]["email"], "keep@x.net")
 		self.assertEqual(out["row_changed"][0][3], [["mobile_no", "P", "P"], ["is_primary", 0, 1]])
 
+	def test_scrub_version_data_renames_only_her_rows_with_matcher(self):
+		class Matcher:
+			# A record not tied to her: names are not compared.
+			names = False
+
+			def value(self, fieldname, value):
+				return value == "m@x.net"
+
+			def row(self, row):
+				return row.get("contact") == "Marisol Vega"
+
+			def row_name(self, name):
+				return name == "her-row"
+
+		data = {
+			"changed": [["lead_name", "Marisol Vega", "Carlos Vega"]],
+			"added": [
+				["contacts", {"contact": "Marisol Vega", "email": "m@x.net"}],
+				["contacts", {"contact": "Rosa", "full_name": "Marisol Vega"}],
+			],
+			"row_changed": [["contacts", 0, "her-row", [["contact", "Marisol Vega", "X"]]]],
+		}
+		renames = {"Marisol Vega": "Erased person PDR-1"}
+		tables = {"contacts": {"full_name", "email"}}
+		out = scrub_version_data(data, {"email"}, "P", tables, renames, Matcher())
+		# A namesake's value outside her rows is not a link to her contact.
+		self.assertEqual(out["changed"], data["changed"])
+		self.assertEqual(out["added"][0][1], {"contact": "Erased person PDR-1", "email": "P"})
+		self.assertEqual(out["added"][1][1], {"contact": "Rosa", "full_name": "Marisol Vega"})
+		self.assertEqual(out["row_changed"][0][3], [["contact", "Erased person PDR-1", "X"]])
+		# Without a matcher (her own records), or on a record tied to her, every old name is
+		# renamed.
+		for matcher in (None, type("Tied", (Matcher,), {"names": True})()):
+			out = scrub_version_data(data, {"email"}, "P", tables, renames, matcher)
+			self.assertEqual(out["changed"], [["lead_name", "Erased person PDR-1", "Carlos Vega"]])
+
 	def test_erase_person_values(self):
 		values = erase_person_values(self.request)
 		self.assertIn(EMAIL, values)

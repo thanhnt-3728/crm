@@ -17,6 +17,7 @@ The text helpers at the top do not need a site.
 
 import json
 import re
+from contextlib import contextmanager
 
 import frappe
 import phonenumbers
@@ -35,7 +36,7 @@ from crm.privacy.erasure import (
 	scrub_version_data,
 )
 from crm.privacy.identifiers import extract_emails, normalize_email, text_contains_email, text_contains_phone
-from crm.privacy.matching import _wildcard_digits, wa_profiles_matching
+from crm.privacy.matching import _wildcard_digits
 from crm.utils import normalize_phone
 
 # Characters allowed between the digits of a phone number typed in text.
@@ -180,6 +181,13 @@ class _Who:
 			full_names={name.casefold() for name in self.names},
 		)
 
+	@property
+	def full_names(self) -> set[str]:
+		"""Names of two words or more (first + last, a full lead or contact name, a requester
+		name). A single first or last name may well be someone else's, so it is not looked
+		for in text."""
+		return {name for name in self.names if len(name.split()) >= 2}
+
 	def in_text(self, text) -> bool:
 		"""Whether `text` contains one of the person's emails or phones."""
 		if not text:
@@ -209,6 +217,9 @@ class _ContentEraser:
 		self.person = placeholder_person(request_name)
 		self.content = placeholder_content(request_name)
 		self.who = _Who(person_values)
+		# Names replaced inside free text: full names only (see `_Who.full_names`), plus the
+		# old names of her renamed contacts once `erase_content` knows them.
+		self.text_names = self.who.full_names
 		self.reindex: set[tuple[str, str]] = set()
 		self.deleted_files: list[dict] = []
 
@@ -217,7 +228,7 @@ class _ContentEraser:
 			text,
 			self.who.emails,
 			self.who.phone_parts,
-			self.who.names if names else (),
+			self.text_names if names else (),
 			self.person,
 			self.content,
 		)
@@ -390,9 +401,10 @@ class _ContentEraser:
 
 	# -- WhatsApp ------------------------------------------------------------------------
 
-	def whatsapp(self, names) -> None:
+	def whatsapp(self, names, profiles) -> None:
 		"""Messages → content placeholder, media cleared; the person's WhatsApp profiles
-		(one per number) deleted, and messages no longer point at them."""
+		(`targets.wa_profiles`, the ones the approval screen listed) deleted, and messages
+		no longer point at them."""
 		if not frappe.db.table_exists("WA Message"):
 			return
 		meta = frappe.get_meta("WA Message")
@@ -401,7 +413,7 @@ class _ContentEraser:
 			values.update({field: None for field in WA_MEDIA_FIELDS if meta.has_field(field)})
 			frappe.db.set_value("WA Message", {"name": ["in", list(names)]}, values, update_modified=False)
 
-		profiles = sorted(wa_profiles_matching(sorted(self.who.phones)))
+		profiles = sorted(profiles or [])
 		if not profiles:
 			return
 		frappe.db.set_value("WA Message", {"to": ["in", profiles]}, "to", None, update_modified=False)
@@ -559,18 +571,23 @@ class _ContentEraser:
 			)
 
 	def other_versions(self, targets) -> None:
-		"""The history of leads, deals and contacts that were not erased but name the person
-		(deals she was removed from, records she was once on): her values, her contacts rows
-		and links to her renamed contact are replaced; the rest of the history stays."""
+		"""The history of leads, deals and contacts that were not erased but hold the
+		person's data: deals she was removed from, and records whose history holds her email,
+		phone or a link to her contact. Her contacts rows (by contact, email or phone) and her
+		emails and phones are replaced; links to her contact inside her rows are renamed.
+
+		Her names are replaced only on the deals she was removed from (tied to her by the
+		request). Elsewhere a value equal to one of her names may be a namesake's, so it
+		stays."""
 		renames = dict(targets.renames or {})
 		erased = {
 			"CRM Lead": set(targets.leads),
 			"CRM Deal": set(targets.deals_still_on),
 			"Contact": set(targets.contacts),
 		}
+		removed_from = set(targets.deals_removed_from)
 		table = frappe.qb.DocType("Version")
 		conditions = self.who.like_conditions(table.data)
-		conditions += [table.data.like(f"%{name}%") for name in sorted(self.who.names)]
 		conditions += [table.data.like(f'%"{old}"%') for old in sorted(renames)]
 		if targets.deals_removed_from:
 			conditions.append(
@@ -586,17 +603,19 @@ class _ContentEraser:
 			.run(as_dict=True)
 		)
 		contacts = set(targets.contacts) | {old for old, new in renames.items() if new in targets.contacts}
-		matcher = _DealVersionMatcher(self.who.person, contacts, set())
+		tied = _DealVersionMatcher(self.who.person, contacts, set())
+		untied = _DealVersionMatcher(self.who.person, contacts, set(), names=False)
 		for version in versions:
 			if version.docname in erased[version.ref_doctype]:
 				continue  # scrubbed with the record
+			is_tied = version.ref_doctype == "CRM Deal" and version.docname in removed_from
 			self.write_version(
 				version,
 				personal_fields(version.ref_doctype),
 				self.person,
 				_version_tables(version.ref_doctype),
 				renames,
-				matcher,
+				tied if is_tied else untied,
 			)
 
 	# -- After commit --------------------------------------------------------------------
@@ -604,10 +623,69 @@ class _ContentEraser:
 	def after_commit(self) -> None:
 		files, pairs = list(self.deleted_files), sorted(self.reindex)
 		self.deleted_files, self.reindex = [], set()
-		if files:
-			frappe.db.after_commit.add(lambda: _remove_from_disk(files))
-		if pairs:
-			frappe.db.after_commit.add(lambda: _reindex(pairs))
+		if files or pairs:
+			work = _AfterCommitWork(files, pairs)
+			frappe.db.after_commit.add(work)
+			tracked = frappe.flags.privacy_after_commit_work
+			if isinstance(tracked, list):
+				tracked.append(work)
+
+
+# -- After commit --------------------------------------------------------------------------
+
+
+class _AfterCommitWork:
+	"""What waits for the commit: removing deleted files from disk and re-indexing. Runs
+	once; does nothing once cancelled (the erasure was rolled back); never raises."""
+
+	def __init__(self, files: list[dict], pairs: list[tuple[str, str]]):
+		self.files = files
+		self.pairs = pairs
+		self.state = "pending"
+
+	def __call__(self) -> None:
+		if self.state != "pending":
+			return
+		self.state = "done"
+		_remove_from_disk(self.files)
+		try:
+			_reindex(self.pairs)
+		except Exception:
+			frappe.log_error(title="Erasure: re-indexing failed")
+
+	def cancel(self) -> None:
+		if self.state == "pending":
+			self.state = "cancelled"
+
+
+@contextmanager
+def tracked_after_commit_work():
+	"""Keep the after-commit work registered inside the block, for
+	`cancel_after_commit_work` and `run_after_commit_work`."""
+	previous = frappe.flags.privacy_after_commit_work
+	frappe.flags.privacy_after_commit_work = []
+	try:
+		yield
+	finally:
+		frappe.flags.privacy_after_commit_work = previous
+
+
+def _tracked_work() -> list:
+	return list(frappe.flags.privacy_after_commit_work or [])
+
+
+def cancel_after_commit_work() -> None:
+	"""The erasure was rolled back: its queued file removal and re-indexing must not run,
+	whether or not the rollback cleared Frappe's after-commit queue."""
+	for work in _tracked_work():
+		work.cancel()
+
+
+def run_after_commit_work() -> None:
+	"""Run the tracked work that has not run yet (another after-commit callback failed
+	before it, and the queue was cleared)."""
+	for work in _tracked_work():
+		work()
 
 
 def _remove_from_disk(rows) -> None:
@@ -660,6 +738,8 @@ def erase_content(request, targets, person_values: set[str]) -> None:
 	`person_values` read before it. Sets `targets.recordings_present` when a call had a
 	recording."""
 	eraser = _ContentEraser(request.name, person_values)
+	old_contacts = {old for old, new in (targets.renames or {}).items() if new in targets.contacts}
+	eraser.text_names = eraser.who.full_names | old_contacts
 	erased = targets.erased_records()
 	content = {
 		"Communication": targets.communications,
@@ -679,7 +759,7 @@ def erase_content(request, targets, person_values: set[str]) -> None:
 	eraser.todos(erased)
 	eraser.comment_caches(erased)
 	eraser.delete_files(targets.files)
-	eraser.whatsapp(targets.wa_messages)
+	eraser.whatsapp(targets.wa_messages, targets.wa_profiles)
 
 	eraser.notifications(erased, content)
 	eraser.email_queue()

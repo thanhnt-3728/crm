@@ -283,6 +283,29 @@ class TestPrivacyPreview(IntegrationTestCase):
 		self.assertEqual(sorted(remove_names(preview, "Call")), sorted([linked.name, by_phone.name]))
 		self.assertIn(note.name, remove_names(preview, "Note"))
 
+	def test_whatsapp_profile_of_active_phone_is_listed(self):
+		if not (frappe.db.table_exists("WA Message") and frappe.db.table_exists("WA Profile")):
+			self.skipTest("whatsapp not installed")
+		lead, contact, deal = self.person()
+		# A number only on her lead, not an identifier: not listed, so not erased.
+		lead.db_set("phone", "+19165550111")
+
+		def profile(phone):
+			doc = frappe.get_doc(
+				{"doctype": "WA Profile", "name": frappe.generate_hash(length=10), "phone_number": phone}
+			)
+			doc.db_insert()
+			return doc.name
+
+		hers, unlisted = profile("(916) 555-0100"), profile("+19165550111")
+		request = confirmed_request(lead, contact, deal)
+
+		self.assertEqual(collect_targets(request).wa_profiles, [hers])
+		preview = get_erasure_preview(request.name)
+		self.assertEqual(remove_names(preview, "WhatsApp profile"), [hers])
+		self.assertNotIn(unlisted, remove_names(preview, "WhatsApp profile"))
+		self.assertEqual(preview["counts"]["WhatsApp profile"], 1)
+
 	def test_recordings_present(self):
 		lead, contact, deal = self.person()
 		request = confirmed_request(lead, contact, deal)

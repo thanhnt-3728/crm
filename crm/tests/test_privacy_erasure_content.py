@@ -32,19 +32,23 @@ CARL_EMAIL = "carl@x.net"
 
 @contextmanager
 def job_transaction():
-	"""Run the erasure job as if in a transaction of its own, inside the test's: its commit
-	runs the after-commit work (file removal, re-indexing) without committing the test's
-	data, and its rollback undoes only what the job did, dropping that work as a real
-	rollback would."""
+	"""Run the erasure job as if in a transaction of its own, inside the test's.
+
+	The job's commit runs Frappe's commit steps (before-commit callbacks, the commit point,
+	after-commit callbacks) with a savepoint as the commit point, so the test's data is not
+	committed. The job's rollback goes back to the last commit point. It does not clear the
+	after-commit queue: what the job queued and failed to cancel would still run at the
+	next commit, so the tests see it."""
 	db = frappe.local.db
 	rollback = db.rollback
 
 	def job_commit(*args, **kwargs):
+		db.before_commit.run()
+		db.savepoint(JOB_SAVEPOINT)
 		db.after_commit.run()
 
 	def job_rollback(*args, **kwargs):
 		rollback(save_point=JOB_SAVEPOINT)
-		db.after_commit.reset()
 
 	db.savepoint(JOB_SAVEPOINT)
 	with patch.object(db, "commit", job_commit), patch.object(db, "rollback", job_rollback):
@@ -444,6 +448,59 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 		self.assertTrue(os.path.exists(path))
 		self.assertFalse(frappe.flags.in_erasure_job)
 
+	def test_failure_after_content_leaves_files_on_disk(self):
+		"""Fails after erase_content queued the file removal: the rollback must leave it
+		inert, so no later commit takes the file off the disk."""
+		file, path = make_file(
+			"erasure-late.txt",
+			"Kept on late failure",
+			attached_to_doctype="CRM Lead",
+			attached_to_name=self.lead.name,
+		)
+		self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+		self.set_status("Erasing")
+		with job_transaction():
+			with patch("crm.privacy.erasure._retain_contracts", side_effect=Exception("late")):
+				self.assertRaises(Exception, run_erasure, self.request.name)
+		self.assertEqual(
+			frappe.db.get_value("CRM Erasure Request", self.request.name, ["status", "erasure_error"]),
+			("Awaiting Sign-off", "late"),
+		)
+		self.assertEqual(frappe.db.get_value("CRM Lead", self.lead.name, "email"), EMAIL)
+		self.assertTrue(frappe.db.exists("File", file.name))
+		# Whatever the job queued runs at the next commit: it must do nothing.
+		frappe.local.db.after_commit.run()
+		self.assertTrue(os.path.exists(path))
+
+	def test_after_commit_failure_keeps_request_erased(self):
+		"""A callback failing after the commit does not undo or misreport the erasure, and
+		the erasure's own file removal still runs."""
+		file, path = make_file(
+			"erasure-after.txt",
+			"Removed anyway",
+			attached_to_doctype="CRM Lead",
+			attached_to_name=self.lead.name,
+		)
+		self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+
+		def failing_callback():
+			raise Exception("after commit")
+
+		self.set_status("Erasing")
+		with job_transaction(), patch("frappe.log_error") as log_error:
+			# Queued before the job's own work, so it fails first.
+			frappe.local.db.after_commit.add(failing_callback)
+			run_erasure(self.request.name)
+
+		self.assertEqual(
+			frappe.db.get_value("CRM Erasure Request", self.request.name, ["status", "erasure_error"]),
+			("Erased", None),
+		)
+		self.assertTrue(log_error.called)
+		self.assertFalse(frappe.db.exists("File", file.name))
+		self.assertFalse(os.path.exists(path))
+		self.assertTrue(is_do_not_contact("Email", EMAIL))
+
 	# -- other places --------------------------------------------------------------------
 
 	def make_notification(self, reference, message, text=""):
@@ -462,7 +519,9 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 
 	def test_notification_text_replaced(self):
 		on_lead = self.make_notification(
-			("CRM Lead", self.lead.name), "<b>Admin</b> mentioned you on Marisol Vega", "Call Marisol"
+			("CRM Lead", self.lead.name),
+			"<b>Admin</b> mentioned you on Marisol Vega",
+			"Call Marisol Vega, not Marisol from accounting",
 		)
 		names_her = self.make_notification(
 			("CRM Deal", self.carl_deal.name), "Forwarded from MARISOL@x.net to Carl", ""
@@ -473,7 +532,11 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 		self.run_job()
 		self.assertEqual(
 			frappe.db.get_value("CRM Notification", on_lead.name, ["message", "notification_text"]),
-			(f"<b>Admin</b> mentioned you on {self.person}", f"Call {self.person}"),
+			# Full names only: a lone first name may be someone else's.
+			(
+				f"<b>Admin</b> mentioned you on {self.person}",
+				f"Call {self.person}, not Marisol from accounting",
+			),
 		)
 		self.assertEqual(
 			frappe.db.get_value("CRM Notification", names_her.name, "message"),
@@ -603,6 +666,11 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 
 		# Her profile's number is typed differently from the identifier.
 		hers, bobs = profile("+1 916-555-0100"), profile(BOB_PHONE)
+		# A number only on her lead, not an identifier: the approval screen did not list its
+		# profile, so it stays.
+		frappe.db.set_value("CRM Lead", self.lead.name, "phone", "+19165550111")
+		unlisted = profile("+19165550111")
+		unlisted_message = message(unlisted, "Front desk", ("CRM Deal", self.carl_deal.name))
 		on_lead = message(hers, "Hi, it's Marisol", ("CRM Lead", self.lead.name))
 		elsewhere = message(hers, "Me again")
 		bob_message = message(bobs, "Bob here", ("CRM Deal", self.carl_deal.name))
@@ -613,6 +681,10 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 			self.assertEqual(frappe.db.get_value("WA Message", name, ["message", "to"]), (self.content, None))
 		self.assertFalse(frappe.db.exists("WA Profile", hers))
 		self.assertTrue(frappe.db.exists("WA Profile", bobs))
+		self.assertTrue(frappe.db.exists("WA Profile", unlisted))
+		self.assertEqual(
+			frappe.db.get_value("WA Message", unlisted_message, ["message", "to"]), ("Front desk", unlisted)
+		)
 		self.assertEqual(
 			frappe.db.get_value("WA Message", bob_message, ["message", "to"]), ("Bob here", bobs)
 		)
@@ -632,6 +704,80 @@ class TestPrivacyErasureContent(IntegrationTestCase):
 		self.assertNotIn(f'"{old_contact}"', history)
 		self.assertNotIn(EMAIL, history.lower())
 		self.assertIn(self.person, history)
+
+	def test_namesake_history_keeps_names(self):
+		"""Her email in another lead's history goes; that lead's own names, equal to hers by
+		chance, stay. On another deal, her contacts row goes and a namesake's row stays."""
+		frappe.db.set_value("CRM Lead", self.lead.name, "last_name", "Vega")
+		carlos = frappe.get_doc(
+			{"doctype": "CRM Lead", "first_name": "Carlos", "last_name": "Vega", "email": "carlos@x.net"}
+		)
+		carlos.flags.ignore_mandatory = True
+		carlos.insert(ignore_permissions=True)
+		lead_version = frappe.get_doc(
+			{
+				"doctype": "Version",
+				"ref_doctype": "CRM Lead",
+				"docname": carlos.name,
+				"data": json.dumps(
+					{
+						"changed": [
+							["email", EMAIL, "carlos@x.net"],
+							["last_name", "Diaz", "Vega"],
+							["lead_name", "Marisol Vega", "Carlos Vega"],
+							# Equal to her old contact name by chance: not a link to it.
+							["first_name", self.contact.name, "Carlos"],
+						]
+					}
+				),
+			}
+		).insert(ignore_permissions=True)
+		namesake_row = {
+			"name": "row-n",
+			"contact": "Marisol Lopez",
+			"full_name": "Marisol",
+			"email": "ml@x.net",
+		}
+		deal_version = frappe.get_doc(
+			{
+				"doctype": "Version",
+				"ref_doctype": "CRM Deal",
+				"docname": self.carl_deal.name,
+				"data": json.dumps(
+					{
+						"added": [["contacts", namesake_row]],
+						"removed": [
+							[
+								"contacts",
+								{
+									"name": "row-h",
+									"contact": self.contact.name,
+									"full_name": "Marisol",
+									"email": EMAIL,
+								},
+							]
+						],
+					}
+				),
+			}
+		).insert(ignore_permissions=True)
+
+		self.run_job()
+
+		data = json.loads(frappe.db.get_value("Version", lead_version.name, "data"))
+		self.assertEqual(
+			data["changed"],
+			[
+				["email", self.person, "carlos@x.net"],
+				["last_name", "Diaz", "Vega"],
+				["lead_name", "Marisol Vega", "Carlos Vega"],
+				["first_name", self.contact.name, "Carlos"],
+			],
+		)
+		data = json.loads(frappe.db.get_value("Version", deal_version.name, "data"))
+		self.assertEqual(data["added"][0][1], namesake_row)
+		hers = data["removed"][0][1]
+		self.assertEqual((hers["contact"], hers["full_name"], hers["email"]), (self.person,) * 3)
 
 	def test_other_lead_history_naming_her_scrubbed(self):
 		other = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Rosa", "email": "rosa@x.net"})
