@@ -298,6 +298,7 @@ doc_events = {
 		],
 	},
 	"CRM Lead": {
+		"before_insert": ["crm.privacy.blocking.before_lead_insert"],
 		"validate": ["crm.privacy.blocking.validate"],
 		"on_update": ["crm.automation.events.on_lead_update"],
 	},

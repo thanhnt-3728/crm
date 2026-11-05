@@ -297,6 +297,99 @@ class TestPrivacyBlocking(IntegrationTestCase):
 
 		self.assertTrue(frappe.db.exists("CRM Lead", {"email": "fresh.sender@x.net"}))
 
+	# -- inbound mail through Frappe's InboundMail (Email Account append_to CRM Lead) --------
+
+	def make_inbox(self):
+		account = frappe.get_doc(
+			{
+				"doctype": "Email Account",
+				"email_account_name": "Privacy Inbox Test",
+				"email_id": "privacy-inbox@example.com",
+				"enable_incoming": 1,
+				"use_imap": 1,
+				"imap_folder": [{"folder_name": "INBOX", "append_to": "CRM Lead"}],
+			}
+		)
+		account.flags.ignore_mandatory = True
+		account.flags.ignore_validate = True
+		return account.insert(ignore_permissions=True)
+
+	def receive(self, account, message_id, sender="Marisol Vega <Marisol@X.net>"):
+		"""Run the account's real receive loop over one raw RFC822 message. Its commits are
+		held back (the test rolls back); a rollback would mean the mail failed."""
+		from frappe.email.receive import InboundMail
+
+		raw = (
+			f"Message-ID: <{message_id}@example.com>\r\n"
+			f"From: {sender}\r\n"
+			"To: privacy-inbox@example.com\r\n"
+			"Subject: Please delete my data\r\n"
+			"Date: Thu, 05 Nov 2026 10:00:00 +0000\r\n"
+			"MIME-Version: 1.0\r\n"
+			"Content-Type: text/plain; charset=utf-8\r\n"
+			"\r\n"
+			"Please erase everything you hold about me.\r\n"
+		)
+		mail = InboundMail(raw, account, uid="1", seen_status=None, append_to="CRM Lead")
+		with (
+			patch.object(type(account), "get_inbound_mails", return_value=[mail]),
+			patch.object(frappe.db, "commit"),
+			patch.object(frappe.db, "rollback") as rollback,
+			patch("frappe.core.doctype.communication.communication.Communication.send_email"),
+		):
+			account.receive()
+		rollback.assert_not_called()
+		return frappe.db.get_value(
+			"Communication",
+			{"message_id": ["like", f"%{message_id}%"]},
+			["name", "reference_doctype", "reference_name"],
+			as_dict=True,
+		)
+
+	def assert_imported_without_lead(self, email):
+		self.assertTrue(email, "the mail was not imported")
+		self.assertFalse(frappe.db.exists("CRM Lead", {"email": ["like", "%marisol@x.net%"]}))
+		self.assertFalse(frappe.db.exists("Unhandled Email", {"email_account": "Privacy Inbox Test"}))
+
+	def test_inbound_mail_open_request_sender_imported_without_lead(self):
+		account = self.make_inbox()
+		request = make_request(identifiers=[{"kind": "Email", "value": ERASED}])
+
+		email = self.receive(account, "privacy-inbound-open")
+
+		self.assert_imported_without_lead(email)
+		self.assertEqual(
+			(email.reference_doctype, email.reference_name), ("CRM Erasure Request", request.name)
+		)
+
+	def test_inbound_mail_do_not_contact_sender_imported_without_lead(self):
+		account = self.make_inbox()
+		add_do_not_contact("Email", ERASED)
+
+		email = self.receive(account, "privacy-inbound-erased")
+
+		self.assert_imported_without_lead(email)
+		self.assertFalse(email.reference_doctype)
+		self.assertTrue(
+			frappe.db.exists(
+				"CRM Notification",
+				{
+					"to_user": COMPLIANCE_USER,
+					"reference_doctype": "Communication",
+					"reference_name": email.name,
+				},
+			)
+		)
+
+	def test_inbound_mail_other_sender_still_creates_a_lead(self):
+		account = self.make_inbox()
+		add_do_not_contact("Email", ERASED)
+
+		email = self.receive(account, "privacy-inbound-other", sender="Bob Stone <bob.stone@x.net>")
+
+		self.assertEqual(email.reference_doctype, "CRM Lead")
+		self.assertEqual(frappe.db.get_value("CRM Lead", email.reference_name, "email"), "bob.stone@x.net")
+
 	# -- WhatsApp ----------------------------------------------------------------------------
 
 	def test_whatsapp_message_from_erased_number_saved_without_lead_and_compliance_told(self):
