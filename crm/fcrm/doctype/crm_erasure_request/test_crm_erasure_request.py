@@ -9,6 +9,7 @@ from crm.fcrm.doctype.crm_erasure_request.crm_erasure_request import (
 	get_permission_query_conditions,
 	has_permission,
 )
+from crm.privacy import system_write
 from crm.privacy.setup import ensure_privacy_setup
 
 USERS = {
@@ -59,6 +60,16 @@ class TestCRMErasureRequest(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
 		frappe.flags.in_erasure_job = False
+		frappe.flags.privacy_system_write = False
+
+	def save_as_system(self, doc):
+		with system_write():
+			doc.save()
+
+	def assert_system_save_invalid(self, doc):
+		"""The close/decline rules still apply to system writes."""
+		with system_write(), self.assertRaises(frappe.ValidationError):
+			doc.save()
 
 	def test_dates_computed(self):
 		r = make_request(received_on="2026-10-26")
@@ -77,7 +88,7 @@ class TestCRMErasureRequest(IntegrationTestCase):
 			status="Erased", checklist=[{"description": "Delete recordings at provider (Twilio)"}]
 		)
 		r.update({"status": "Closed", "answered_on": today(), "outcome": "Completed"})
-		self.assertRaises(frappe.ValidationError, r.save)
+		self.assert_system_save_invalid(r)
 
 	def test_can_close_when_checklist_done(self):
 		r = make_request(
@@ -85,31 +96,62 @@ class TestCRMErasureRequest(IntegrationTestCase):
 			checklist=[{"description": "Delete recordings at provider (Twilio)", "done": 1}],
 		)
 		r.update({"status": "Closed", "answered_on": today(), "outcome": "Completed"})
-		r.save()
+		self.save_as_system(r)
 		self.assertEqual(r.status, "Closed")
 
 	def test_close_needs_answered_on_and_outcome(self):
 		r = make_request(status="Erased")
 		r.update({"status": "Closed", "outcome": "Completed"})
-		self.assertRaises(frappe.ValidationError, r.save)
+		self.assert_system_save_invalid(r)
 		r.update({"answered_on": today(), "outcome": ""})
-		self.assertRaises(frappe.ValidationError, r.save)
+		self.assert_system_save_invalid(r)
 
 	def test_denied_needs_reason(self):
 		r = make_request(status="Erased")
 		r.update({"status": "Closed", "answered_on": today(), "outcome": "Denied"})
-		self.assertRaises(frappe.ValidationError, r.save)
+		self.assert_system_save_invalid(r)
 		r.denial_reason = "Identity could not be verified"
-		r.save()
+		self.save_as_system(r)
 		self.assertEqual(r.status, "Closed")
 
 	def test_declined_needs_reason(self):
 		r = make_request()
 		r.status = "Declined"
-		self.assertRaises(frappe.ValidationError, r.save)
+		self.assert_system_save_invalid(r)
 		r.denial_reason = "Legal exemption"
-		r.save()
+		self.save_as_system(r)
 		self.assertEqual(r.status, "Declined")
+
+	def test_rest_write_to_status_rejected(self):
+		frappe.set_user("rep@example.com")
+		r = make_request()
+		r.status = "Erased"
+		self.assertRaises(frappe.ValidationError, r.save)
+
+	def test_rest_write_to_protected_fields_rejected(self):
+		for fieldname, value in [
+			("logged_by", "comp2@example.com"),
+			("approved_by", "comp2@example.com"),
+			("acknowledge_by", "2030-01-01"),
+			("day30_reminder_sent", 1),
+		]:
+			r = make_request()
+			r.set(fieldname, value)
+			self.assertRaises(frappe.ValidationError, r.save)
+
+	def test_system_write_allows_status(self):
+		r = make_request()
+		with system_write():
+			r.status = "Awaiting Sign-off"
+			r.save()
+		self.assertEqual(r.status, "Awaiting Sign-off")
+		self.assertFalse(frappe.flags.privacy_system_write)
+
+	def test_received_on_stays_editable_and_recomputes_deadlines(self):
+		r = make_request(received_on="2026-10-26")
+		r.received_on = "2026-10-27"
+		r.save()
+		self.assertEqual(str(r.respond_by), "2026-12-11")
 
 	def test_logger_cannot_approve_even_if_compliance(self):
 		r = make_request(logged_by="comp1@example.com")

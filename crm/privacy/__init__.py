@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import frappe
 
 
@@ -22,3 +24,18 @@ def compliance_users() -> list[str]:
 	if not holders:
 		return []
 	return frappe.get_all("User", filters={"name": ["in", holders], "enabled": 1}, pluck="name")
+
+
+@contextmanager
+def system_write():
+	"""Mark saves inside the block as made by the privacy system, not by a user.
+
+	CRM Erasure Request refuses user writes to its status, approval and bookkeeping fields;
+	code that legitimately moves them (submit, approve, erasure job, reminders) wraps its
+	save in this. The previous flag value is restored on exit, so blocks nest."""
+	previous = frappe.flags.privacy_system_write
+	frappe.flags.privacy_system_write = True
+	try:
+		yield
+	finally:
+		frappe.flags.privacy_system_write = previous

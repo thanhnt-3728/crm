@@ -12,6 +12,22 @@ FULL_ACCESS_ROLES = {"Compliance", "Sales Manager"}
 CRM_ROLES = {"Sales User", "Sales Manager", "Compliance"}
 LOGGER_VISIBLE_STATUS = "Logged"
 
+# Moved only by the privacy system (see `crm.privacy.system_write`), never by a user write.
+PROTECTED_FIELDS = (
+	"status",
+	"logged_by",
+	"approved_by",
+	"approved_on",
+	"erased_on",
+	"erasure_error",
+	"delete_after",
+	"acknowledge_by",
+	"respond_by",
+	"ack_reminder_sent",
+	"day30_reminder_sent",
+	"day40_alert_sent",
+)
+
 
 class CRMErasureRequest(Document):
 	# begin: auto-generated types
@@ -63,9 +79,19 @@ class CRMErasureRequest(Document):
 		self.logged_by = frappe.session.user
 
 	def validate(self):
+		self.reject_protected_field_changes()
 		self.set_deadlines()
 		self.guard_and_stamp_checklist()
 		self.validate_status_rules()
+
+	def reject_protected_field_changes(self):
+		if self.is_new() or frappe.flags.privacy_system_write:
+			return
+		for fieldname in PROTECTED_FIELDS:
+			if self.has_value_changed(fieldname):
+				frappe.throw(
+					_("{0} can only be changed by the system.").format(self.meta.get_label(fieldname))
+				)
 
 	def set_deadlines(self):
 		received = getdate(self.received_on)
