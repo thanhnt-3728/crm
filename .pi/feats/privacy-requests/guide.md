@@ -52,7 +52,7 @@ Any CRM user can log a request. You do not erase anything. You record what arriv
 
 Use this when the person is not in the CRM under the address they wrote from.
 
-1. Open **Privacy requests** in the sidebar. The sidebar entry is shown to Compliance and Sales Managers. A rep without it logs from a lead, contact or deal, or asks one of them to log the request.
+1. Open **Privacy requests** in the sidebar (or "Privacy requests" in the command palette). Every CRM user has it. Reps see only the requests they logged themselves.
 2. Click **Log request** and fill in the same form.
 3. The CRM suggests matching records on the next page.
 
@@ -70,7 +70,7 @@ If the person is a contact on an open deal, the request goes **On Hold** instead
 
 ### If you own a deal that holds a request
 
-Deal owners get a notification and an email when someone on their open deal has an erasure request. An open deal is one whose status is Open, Ongoing or On Hold (not Won or Lost). Remove the person from the deal's contacts, or close the deal as Won or Lost. When no confirmed person is on an open deal any more, the request returns to **Awaiting Sign-off** on its own.
+Deal owners get a notification and an email when someone on their open deal has an erasure request. It names the request and the deal, not the person: ask Compliance if it is not clear which contact it is. An open deal is one whose status is Open, Ongoing or On Hold (not Won or Lost). Remove the person from the deal's contacts, or close the deal as Won or Lost. When no confirmed person is on an open deal any more, the request returns to **Awaiting Sign-off** on its own.
 
 ---
 
@@ -90,7 +90,7 @@ Logged -> Awaiting Sign-off -> Erased -> Closed
 - **Logged**: the logger is still confirming matches.
 - **Awaiting Sign-off**: submitted and ready for review.
 - **On Hold**: a confirmed person is a contact on an open deal. Approval is not possible. The 45-day clock and the reminders keep running.
-- **Erasing**: a short lock while the erasure job runs. You cannot change the request.
+- **Erasing**: a short lock while the erasure job runs. You cannot change the request. If it is still Erasing an hour after approval, see "A request stuck in Erasing".
 - **Erased**: the job finished. The request waits for the answer to be sent.
 - **Declined**: you decided not to erase. A reason is required.
 - **Closed**: answered and wiped (see "Closing a request").
@@ -107,6 +107,12 @@ Open the request. You can edit matches and identifiers until it is approved, the
 - **Exclude** a shared number or inbox. This stops one erasure from wiping colleagues' calls and emails, and from permanently blocking a shared number.
 - Only **confirmed, non-excluded** emails and phones drive the sweep of emails, calls and the do-not-contact list.
 - Records a request has been removed from while On Hold show a **Removed from open deal** tag.
+- **New records are added for you.** While a request is Logged, Awaiting Sign-off or On Hold, a new lead or contact (or a new contact row on a deal) with one of the request's active emails or phones is still created, because it may be someone else. It is added to the request's matches **unconfirmed**, and Compliance gets a notification on the request. Confirm it if it is the person. A record like this created while the erasure is running is not added: the notification asks you to review it by hand.
+- Only Compliance (until approval) and the logger (while Logged) can change the requester's details, matches, identifiers and contract references. Any other change, from the API or the request page, is refused. Sales Managers can read requests but not change them.
+
+### Emails from the requester
+
+While a request is open, an email that arrives from one of its active email identifiers is attached to it, and Compliance gets a notification on the request (once per email). An email that already belongs to a lead or deal (a reply on its thread) stays there and also gets a link to the request, so it shows in both places. Compliance and Sales Managers see these emails, with subject and date, under **Emails from the requester** on the request page.
 
 ### Acknowledging
 
@@ -118,12 +124,12 @@ If the person signed a contract or order with Northpine, enter the contract refe
 
 ### Approving
 
-You can approve only when the request is **Awaiting Sign-off**, you hold Compliance, and **you are not the person who logged it**. The server checks this by user.
+You can approve only when the request is **Awaiting Sign-off**, the Compliance role is assigned to your user, and **you are not the person who logged it**. The server checks this by user. The **Administrator** account never approves, even though it has every role.
 
 1. Click **Approve**. The approval screen shows:
    - **Will be removed**: each kind of record, with links and counts.
    - **Will be kept**: the organization, deal values, status and stage, anonymized lead and deal shells, email, call and note records as placeholders, the notes, tasks and files of open deals the person was removed from, and any retained-contract entry.
-   - **Needs attention**: open checklist items, and **custom fields on leads, deals or contacts that are not on the personal-fields list**. If one holds personal data, stop, ask an admin to add it to Privacy settings, then come back.
+   - **Needs attention**: open checklist items, **matches nobody confirmed** (records created while the request was open among them; they are not erased unless confirmed), and **custom fields on leads, deals or contacts that are not on the personal-fields list**. If a custom field holds personal data, stop, ask an admin to add it to Privacy settings, then come back. If an unconfirmed match is the person, cancel, confirm it on the request, then approve.
 2. Type the request number (for example `PDR-0001`) exactly to confirm.
 3. Click **Approve and erase**. This cannot be undone.
 
@@ -133,6 +139,10 @@ Only one approval can ever go through. A second click, or a second Compliance us
 
 The erasure runs in the background and is all or nothing. If it fails, the request goes back to **Awaiting Sign-off** and the page shows **The erasure failed** with the error. Fix the cause and approve again.
 
+### A request stuck in Erasing
+
+The erasure job is stopped after an hour. If a worker died or the job never ran, the request can stay **Erasing**. Once it has been Erasing for more than an hour since approval without finishing, Compliance sees **Reset stuck erasure** on the request. Resetting puts it back to **Awaiting Sign-off**, with "Erasure job did not finish; reset by <user>" as its error. Nothing was erased (the job is all or nothing), so approve it again. If the job was in fact still running and finishes after the reset, it fails rather than overwrite the reset, and the request stays Awaiting Sign-off.
+
 ### What erasure does
 
 | Where | Result |
@@ -140,13 +150,15 @@ The erasure runs in the background and is all or nothing. If it fails, the reque
 | Confirmed leads | Personal fields blanked. The name becomes `Erased person PDR-0001`. The lead stays. |
 | Confirmed contacts | Personal fields blanked, email and phone rows removed, photo deleted. The contact stays so links hold. |
 | Confirmed deals the person is still on | Their row in the deal's contacts is anonymized. The deal's own personal fields are blanked only where they hold the person's values. Values, status and stage are untouched. |
-| Addresses linked to the contact | All fields blanked. |
+| Open deals the person was removed from while On Hold | The deal's own personal fields that are the person's are blanked: for example the name, job title and social links that a deal converted from the person's lead still holds. The email and phones of the deal's new primary contact stay, and so do the deal's notes, tasks, comments and files. The approval screen lists these deals under **Deal details**. |
+| Addresses linked to the contact | All fields blanked. An address also linked to someone else only loses its link to the person. |
 | Emails | **Never deleted.** Subject and content become `Content erased PDR-0001`. Their address in sender, recipients, CC and BCC is replaced with `Erased person PDR-0001`. Other people's addresses on the same email stay. |
 | Calls | Record kept. Number replaced, recording link cleared. |
 | Notes, tasks, comments | Record kept. Text becomes `Content erased PDR-0001`. Task status, dates and assignee are kept. |
 | Files | Deleted. |
 | Change history and Frappe's deleted-document copies | Scrubbed. |
-| Notifications, email queue, WhatsApp messages and similar | Mentions of the person replaced. |
+| Notifications, email queue, WhatsApp messages and similar | Mentions of the person replaced, including in notifications about deals the person was removed from. The person's event participant rows are deleted. |
+| Search | The CRM search and Frappe's global search are updated once the erasure is committed. |
 
 **Known limitation.** Passing mentions inside other people's records, for example a deal note saying "Marisol prefers Tuesdays", are not searched for or erased. The outcome email tells the requester this.
 
@@ -164,7 +176,12 @@ On a Logged, Awaiting Sign-off or On Hold request, click **Decline** and give a 
 
 ### Sending the answer
 
-You write and send the answer to the requester yourself. Use the **Erasure outcome** email template. Fill in the bracketed parts before sending:
+You write and send the answer to the requester yourself; the CRM does not send it. Use the **Erasure outcome** email template, in one of two ways:
+
+- **From your email client**: open the template in Desk (**Email Template**, then **Erasure outcome**), copy its subject and body into a new email to the requester, fill in the bracketed parts and send it.
+- **From Desk**: open the request in Desk (`/app/crm-erasure-request/PDR-xxxx`), click **New Email**, choose the template **Erasure outcome** and the requester's address, fill in the bracketed parts and send. The email is then attached to the request, and is erased with the request's other emails at close.
+
+Fill in the bracketed parts before sending:
 
 - **What was erased**, in plain categories, and whether it was also done at external providers.
 - **What was kept and why**, such as name and contract reference under the signed-contract exception, or a partial denial and its reason.
@@ -200,7 +217,7 @@ Everything else is wiped from the request: names, emails, phones, original messa
 - A lead, contact or deal (including its contacts rows) **cannot be created** with an erased email or phone, and an existing record cannot be changed to one. This applies to manual entry, imports, Facebook lead sync, creating a lead from a call log and WhatsApp lead creation. The user sees: "This person asked to be erased under a privacy request. Their details can't be added to the CRM."
 - Existing records saved without changing those fields are not blocked.
 - Nothing lifts a block. If the person comes back, their old email and phone stay blocked.
-- **Incoming email is never rejected**, because that would break mailbox sync. Instead no lead is created from it. While the request is open the email is attached to the request. After close it is attached to nothing and Compliance gets a notification to decide what to do with it. A WhatsApp message from an erased number is saved without a lead, with a notification to Compliance.
+- **Incoming email is never rejected**, because that would break mailbox sync. Instead no lead is created from it, whether by the CRM's "create lead from incoming email" setting or by a mailbox set to append to CRM Lead. While the request is open the email is attached to the request (see "Emails from the requester"). After close it is attached to nothing and Compliance gets a notification to decide what to do with it. A WhatsApp message from an erased number is saved without a lead, with a notification to Compliance.
 
 ### Reminders
 
@@ -223,6 +240,7 @@ Open **Settings -> Privacy**. It is available to Compliance and System Managers.
 - **Head of Compliance**: a user. Alerted on day 40 of an unanswered request.
 - **Contract retention period (months)**: how long a name and contract reference are kept under the signed-contract exception. **0 keeps them until counsel sets a period.** Counsel sets this value. Do not guess it.
 - **Personal fields**: the list of fields that erasure blanks on every matched record, grouped by document type (Lead, Deal, Contact, Deal contacts, Address). It ships pre-filled with names, email, phone and mobile, job title, photo, address, gender and the lead and deal social links. The website field is a company field and is not listed.
+- **Core fields can't be removed.** Email, mobile, phone, first and last name, and lead name or full name on Lead, Deal, Contact and Deal contacts identify the person: without them erasure would leave the person in place. A list without one of them is refused on save. You can add fields, and remove the other pre-filled ones.
 
 ### Why custom fields must be added
 
@@ -235,6 +253,12 @@ The settings also hold an automatically generated secret used for the do-not-con
 - Create or assign the **Compliance** role (created on install). Give it to the Privacy team, in addition to Sales User or Sales Manager.
 - Only people with Compliance can approve, decline, manage the checklist and close.
 - **Compliance** and **Sales Manager** see all requests in full. The logger sees their own request in full only while it is Logged. Nobody else sees requests.
+
+### Known limits
+
+- **Scanning large tables.** Matching and erasure search emails, call logs, change history and deleted-document copies with SQL prefilters, then compare in Python. A phone can be typed many ways, so phone lookups use a broad `LIKE` pattern, and every deleted-document copy of a lead, contact, deal or email is read when a phone is erased. On sites with millions of emails or versions, the match counts on a request and the erasure job can be slow. The job is stopped after an hour; a request it did not finish can be reset (see "A request stuck in Erasing").
+- **The outcome email is not sent by the CRM.** See "Sending the answer".
+- **Passing mentions** inside other people's records are not searched for (see "What erasure does").
 
 ---
 
@@ -286,7 +310,7 @@ Create the data for **Marisol Vega** (`marisol.vega@sierrafoothills.example`, ph
    - Expect: a new `PDR-` number, status **Logged**, the lead as a confirmed match, and Marisol's contact and the deals suggested as matches.
 3. **Confirm matches.** Confirm the contact and all three deals. Check that the email and the phone each show a match count.
 4. **Submit.** Click **Submit to Compliance**.
-   - Expect: status **On Hold**, because Marisol's contact is on Deal A, which is open. Owen gets a notification and an email about Deal A.
+   - Expect: status **On Hold**, because Marisol's contact is on Deal A, which is open. Owen gets a notification and an email about Deal A. They name the request number and Deal A, not Marisol.
    - Expect: Tyler now sees only status, dates and days left.
 5. **Try to approve while On Hold** as Dana. Expect that **Approve** is not offered, and the API refuses it.
 6. **Resolve the hold.** As Owen, remove Marisol's contact from Deal A's contacts and save.
@@ -298,7 +322,7 @@ Create the data for **Marisol Vega** (`marisol.vega@sierrafoothills.example`, ph
    - Expect: **Approve** is not offered to Dana on that request, and calling `crm.api.erasure.approve` as Dana is refused ("Only a Compliance user who did not log this request can approve it."). **Decline** is refused too.
    - As Priya: **Approve** is offered. Decline this request as Priya with a reason, then close it as **Denied**, so it does not stay open.
 9. **Open the approval screen** as Dana, on Marisol's request.
-   - Expect: **Will be removed** lists the lead, the contact, Deals B and C, the emails and calls, notes, tasks and files. **Will be kept** lists the organization, deal values and Deal A's own notes, tasks and files. **Needs attention** flags the custom field **Personal mobile**.
+   - Expect: **Will be removed** lists the lead, the contact, Deals B and C, Deal A under **Deal details**, the emails and calls, notes, tasks and files. **Will be kept** lists the organization, deal values and Deal A's own notes, tasks and files. **Needs attention** flags the custom field **Personal mobile**.
 10. **Add the custom field.** In Settings -> Privacy, add **CRM Lead -> Personal mobile** and save. Reopen the approval screen and confirm the flag is gone.
 11. **Approve.** As Dana, type the request number wrongly (expect an error), then correctly, and click **Approve and erase**.
     - Expect: status **Erasing**, then **Erased**. Have Priya call approve right after: expect an error, and only one erasure job in the background job list.
@@ -307,7 +331,7 @@ Create the data for **Marisol Vega** (`marisol.vega@sierrafoothills.example`, ph
     - Contact: names are the placeholder, and the email and phone rows are gone. The Address linked to the contact has every field blank.
     - Deal B (Won, Marisol primary): the contacts row is anonymized (name is the placeholder, email and phone blank, the contact link kept). The deal's own name, email, mobile and phone fields are blank. Its notes are erased and its file is gone. Its value, status and stage are unchanged.
     - Deal C (Won, Chris Lee primary): Marisol's row is anonymized, but **Chris Lee's email, mobile and phone on the deal are untouched**.
-    - Deal A (Marisol's contact was removed): its own notes, tasks and files are still there, including the "Marisol prefers Tuesdays" note.
+    - Deal A (Marisol's contact was removed): its own notes, tasks and files are still there, including the "Marisol prefers Tuesdays" note. If Deal A was converted from Marisol's lead, its own name, job title and social fields are blank; the email and phones of its current primary contact are untouched.
     - Emails: content is `Content erased PDR-xxxx`; Marisol's address is replaced with `Erased person PDR-xxxx`, in any case or display-name form; `bob@sierrafoothills.example` is unchanged on the email with the CC.
     - Call log: number replaced, recording link cleared.
 13. **Check the checklist.** Expect **Delete recordings at provider (Twilio)** on the request.
@@ -321,7 +345,7 @@ Create the data for **Marisol Vega** (`marisol.vega@sierrafoothills.example`, ph
 16. **Check the block.** Try to create a new lead with Marisol's email, then another with `916.555.0100` as the phone, then a deal with a contact row holding either value.
     - Expect: each is refused with "This person asked to be erased under a privacy request. Their details can't be added to the CRM." Changing an existing record's email to the erased one is refused too. A record saved without touching those fields still saves.
 17. **Send an email from Marisol's address** to a connected mailbox, while the request is Erased and not yet closed.
-    - Expect: no lead is created and the email is attached to the request.
+    - Expect: no lead is created, the email is attached to the request and listed under **Emails from the requester**, and Compliance gets one notification that opens the request. Repeat with the mailbox set to **Append To: CRM Lead**: same result, and no Unhandled Email.
 18. **Try to close early.** As Dana, click **Close request**, enter a date answered and the outcome Completed.
     - Expect: refused, because the Twilio item is open.
 19. **Tick the checklist item**, then close with **Completed**.
