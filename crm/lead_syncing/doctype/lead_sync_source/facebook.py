@@ -5,6 +5,8 @@ from frappe.exceptions import ValidationError
 from frappe.integrations.utils import make_get_request
 from frappe.utils import get_datetime, get_system_timezone, now_datetime
 
+from crm.privacy.blocking import ErasedPersonError
+
 FB_GRAPH_API_BASE = "https://graph.facebook.com"
 FB_GRAPH_API_VERSION = "v23.0"
 # Meta compares whole seconds and its clock is not ours, so each run re-reads a few
@@ -68,6 +70,10 @@ class FacebookSyncSource:
 					**crm_lead_data,
 				}
 			).insert(ignore_permissions=True)
+		except ErasedPersonError:
+			# The person asked to be erased: skip the lead. Nothing is logged, since the log
+			# would store the very details that must not come back.
+			return None
 		except (frappe.UniqueValidationError, DuplicateLeadError):
 			self.create_failure_log(lead, "Duplicate")
 			if raise_exception:

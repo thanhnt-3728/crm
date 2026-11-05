@@ -6,9 +6,11 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from crm.api.whatsapp import validate as validate_whatsapp_message
 from crm.fcrm.doctype.crm_erasure_request.test_crm_erasure_request import make_request, make_user
 from crm.lead_syncing.doctype.lead_sync_source.facebook import FacebookSyncSource
 from crm.privacy.identifiers import add_do_not_contact
+from crm.privacy.inbound import on_whatsapp_insert
 from crm.privacy.setup import ensure_privacy_setup
 from crm.tests.test_privacy_matching import ensure_deal_status
 from crm.utils import create_lead_from_incoming_email
@@ -193,9 +195,9 @@ class TestPrivacyBlocking(IntegrationTestCase):
 
 		self.assertFalse(frappe.db.exists("CRM Lead", {"facebook_lead_id": "blocking-fb-1"}))
 		self.assertFalse(frappe.db.exists("CRM Lead", {"email": ERASED}))
-		# it is logged as a failure, with the reason in the traceback
-		self.assertTrue(failure_log.called)
-		self.assertIn(MESSAGE, failure_log.call_args.kwargs["traceback"])
+		# skipped quietly: nothing is logged, since the log would hold her details
+		failure_log.assert_not_called()
+		self.assertFalse(frappe.db.exists("Failed Lead Sync Log", {"source": "blocking-source"}))
 
 	# -- inbound email -----------------------------------------------------------------------
 
@@ -262,3 +264,81 @@ class TestPrivacyBlocking(IntegrationTestCase):
 		email.reload()
 		self.assertFalse(email.reference_doctype)
 		self.assertFalse(frappe.db.exists("CRM Notification", {"reference_name": email.name}))
+
+	def test_failing_routing_does_not_reject_the_email(self):
+		make_request(identifiers=[{"kind": "Email", "value": ERASED}])
+		add_do_not_contact("Email", ERASED)
+		frappe.db.set_value("CRM Erasure Request", {"status": ["!=", "Closed"]}, "status", "Closed")
+
+		with patch("crm.privacy.inbound.notify", side_effect=Exception("mail down")):
+			email = make_email(ERASED).insert(ignore_permissions=True)
+		self.assertTrue(frappe.db.exists("Communication", email.name))
+
+		with patch("crm.privacy.identifiers.scramble", side_effect=Exception("no hash secret")):
+			email = make_email("bob@x.net").insert(ignore_permissions=True)
+		self.assertTrue(frappe.db.exists("Communication", email.name))
+
+	def test_failing_sender_check_does_not_stop_lead_creation_path(self):
+		email = make_email("fresh.sender@x.net", email_account="Blocking Account").insert(
+			ignore_permissions=True
+		)
+		real_get_value = frappe.db.get_value
+
+		def get_value(doctype, *args, **kwargs):
+			if doctype == "Email Account":
+				return 1
+			return real_get_value(doctype, *args, **kwargs)
+
+		with (
+			patch.object(frappe.db, "get_value", side_effect=get_value),
+			patch("crm.privacy.inbound.is_erased_sender", side_effect=Exception("boom")),
+		):
+			create_lead_from_incoming_email(email)  # must not raise
+
+		self.assertTrue(frappe.db.exists("CRM Lead", {"email": "fresh.sender@x.net"}))
+
+	# -- WhatsApp ----------------------------------------------------------------------------
+
+	def test_whatsapp_message_from_erased_number_saved_without_lead_and_compliance_told(self):
+		add_do_not_contact("Phone", "+19165550100")
+		message = frappe._dict(
+			direction="Incoming",
+			whatsapp_account="Blocking WA",
+			to="Blocking Profile",
+			name="WAM-BLOCKING-1",
+			reference_doctype=None,
+			reference_docname=None,
+			flags=frappe._dict(),
+		)
+
+		def create_lead(doc, action):
+			return make_lead(first_name="W", mobile_no="(916) 555-0100").name
+
+		with (
+			patch("crm.api.whatsapp._get_phone_number_from_profile", return_value="(916) 555-0100"),
+			patch("crm.api.whatsapp._link_profile_to_crm_entities"),
+			patch("crm.api.whatsapp.find_contact_lead_or_deal_from_number", return_value=(None, None)),
+			patch("crm.api.whatsapp._lead_append_action", return_value=frappe._dict()),
+			patch("crm.api.whatsapp._create_lead", side_effect=create_lead),
+		):
+			validate_whatsapp_message(message, None)  # must not raise
+
+		self.assertFalse(message.reference_doctype)
+		self.assertFalse(message.reference_docname)
+		self.assertFalse(frappe.db.exists("CRM Lead", {"mobile_no": "(916) 555-0100"}))
+
+		with patch("crm.privacy.inbound.notify") as notify:
+			on_whatsapp_insert(message, None)
+		notify.assert_called_once()
+		args, kwargs = notify.call_args
+		self.assertEqual(args[1], "WhatsApp message received from an erased person")
+		self.assertEqual(
+			(kwargs["reference_doctype"], kwargs["reference_name"]), ("WA Message", message.name)
+		)
+		self.assertNotIn("555", args[2])
+
+	def test_whatsapp_message_without_erased_flag_notifies_nobody(self):
+		message = frappe._dict(name="WAM-BLOCKING-2", flags=frappe._dict())
+		with patch("crm.privacy.inbound.notify") as notify:
+			on_whatsapp_insert(message, None)
+		notify.assert_not_called()

@@ -282,6 +282,7 @@ doc_events = {
 	},
 	"WA Message": {
 		"validate": ["crm.api.whatsapp.validate"],
+		"after_insert": ["crm.privacy.inbound.on_whatsapp_insert"],
 		"on_submit": ["crm.api.whatsapp.update_reference_modified"],
 		"on_update": [
 			"crm.api.whatsapp.notify_agent",

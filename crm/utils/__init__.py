@@ -263,9 +263,16 @@ def create_lead_from_incoming_email(doc: Communication, method: str | None = Non
 	if not create_lead_enabled:
 		return
 
+	from crm.privacy.blocking import ErasedPersonError
 	from crm.privacy.inbound import is_erased_sender
 
-	if is_erased_sender(doc.sender):
+	try:
+		erased = is_erased_sender(doc.sender)
+	except Exception:
+		# Never let this check reject an incoming email; behave as before it existed.
+		frappe.log_error(title="Erased-sender check failed")
+		erased = False
+	if erased:
 		return
 
 	if frappe.db.exists("CRM Lead", {"email": doc.sender}):
@@ -288,7 +295,10 @@ def create_lead_from_incoming_email(doc: Communication, method: str | None = Non
 	if frappe.db.exists("CRM Lead Source", "Email"):
 		lead.source = "Email"
 
-	lead.insert(ignore_permissions=True)
+	try:
+		lead.insert(ignore_permissions=True)
+	except ErasedPersonError:
+		return
 
 	doc.reference_doctype = "CRM Lead"
 	doc.reference_name = lead.name

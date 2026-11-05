@@ -3,6 +3,13 @@ from frappe import _
 
 from crm.privacy.identifiers import is_do_not_contact
 
+
+class ErasedPersonError(frappe.ValidationError):
+	"""Raised when a save would add an erased person's details to the CRM. Paths that
+	create records in bulk or in the background (lead sync, incoming messages) catch it to
+	skip the record quietly, without logging the details they were given."""
+
+
 # Fields on the document itself, by identifier kind.
 _FIELDS = {
 	"CRM Lead": (("Email", "email"), ("Phone", "mobile_no"), ("Phone", "phone")),
@@ -30,7 +37,7 @@ def validate(doc, method=None) -> None:
 			_(
 				"This person asked to be erased under a privacy request. Their details can't be added to the CRM."
 			),
-			frappe.ValidationError,
+			ErasedPersonError,
 		)
 
 
