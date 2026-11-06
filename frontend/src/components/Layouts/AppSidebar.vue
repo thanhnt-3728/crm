@@ -198,6 +198,7 @@ import Icon from '@/components/Icon.vue'
 import PinIcon from '@/components/Icons/PinIcon.vue'
 import UserDropdown from '@/components/UserDropdown.vue'
 import { getNavigationItems } from '@/utils/navigation'
+import { useErasureAccess } from '@/composables/erasure-access'
 import ContactsIcon from '@/components/Icons/ContactsIcon.vue'
 import DealsIcon from '@/components/Icons/DealsIcon.vue'
 import LeadsIcon from '@/components/Icons/LeadsIcon.vue'
@@ -269,7 +270,10 @@ const isCollapsed = computed(() => isSidebarCollapsed.value && !props.mobile)
 const isFCSite = ref(window.is_fc_site)
 const isDemoSite = ref(window.is_demo_site)
 
-const links = getNavigationItems({ mobile: props.mobile })
+const { roles: userRoles } = useErasureAccess()
+const links = computed(() =>
+  getNavigationItems({ mobile: props.mobile, roles: userRoles.value }),
+)
 
 const allViews = computed(() => {
   let _views = [
@@ -277,7 +281,7 @@ const allViews = computed(() => {
       name: 'All Views',
       hideLabel: true,
       opened: true,
-      views: links.map((link) => ({
+      views: links.value.map((link) => ({
         label: link.label,
         icon: link.icon,
         key: link.route,

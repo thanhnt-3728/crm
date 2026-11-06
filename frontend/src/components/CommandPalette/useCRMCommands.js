@@ -15,6 +15,7 @@ import {
   setCommandPaletteProvider,
 } from '@/composables/useCommandPalette'
 import { getNavigationItems } from '@/utils/navigation'
+import { useErasureAccess } from '@/composables/erasure-access'
 import { activityHashFor } from '@/utils/activityHash'
 import { activityCommand } from './activityCommands'
 import ContactsIcon from '@/components/Icons/ContactsIcon.vue'
@@ -97,7 +98,10 @@ export function useCRMCommands() {
   const { user } = sessionStore()
   const { isManager } = usersStore()
   const state = createSearchState()
+  // Fetched once here so the roles are usually in before the palette first opens.
+  const { roles } = useErasureAccess()
   const context = {
+    roles,
     capture,
     emit,
     showModal,
@@ -123,7 +127,7 @@ function createSearchState() {
 }
 
 function buildCommands(context) {
-  const { capture, emit, showModal, isManager, whatsappInstalled, state } =
+  const { capture, emit, showModal, isManager, whatsappInstalled, state, roles } =
     context
   const tracked = trackWith(capture)
   return ordered([
@@ -131,7 +135,7 @@ function buildCommands(context) {
       ? []
       : upcomingCommands(state.upcoming.value, tracked)),
     ...contextualCommands(tracked),
-    ...navigationCommands(tracked),
+    ...navigationCommands(tracked, roles.value),
     ...createCommands(tracked, emit, showModal),
     ...settingsCommands(tracked, isManager, whatsappInstalled.value),
     ...(state.error.value ? [searchErrorCommand()] : []),
@@ -279,8 +283,8 @@ function contextualCommands(tracked) {
   )
 }
 
-function navigationCommands(tracked) {
-  return getNavigationItems().map((item) =>
+function navigationCommands(tracked, roles) {
+  return getNavigationItems({ roles }).map((item) =>
     tracked(
       {
         id: `navigate-${item.route}`,

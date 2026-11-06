@@ -175,6 +175,13 @@
                 />
 
                 <Button
+                  v-if="canLogErasure"
+                  :tooltip="__('Log erasure request')"
+                  icon="lucide-user-x"
+                  @click="showErasureDialog = true"
+                />
+
+                <Button
                   v-if="canDelete"
                   :tooltip="__('Delete')"
                   variant="subtle"
@@ -229,6 +236,13 @@
       }
     "
   />
+  <LogErasureRequestDialog
+    v-if="canLogErasure"
+    v-model="showErasureDialog"
+    source-doctype="CRM Lead"
+    :source-docname="leadId"
+    :source-doc="doc"
+  />
   <DeleteLinkedDocModal
     v-if="showDeleteLinkedDocModal"
     v-model="showDeleteLinkedDocModal"
@@ -245,6 +259,8 @@
   />
 </template>
 <script setup>
+import LogErasureRequestDialog from '@/components/Erasure/log-erasure-request-dialog.vue'
+import { useErasureAccess } from '@/composables/erasure-access'
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
 import ErrorPage from '@/components/ErrorPage.vue'
 import Icon from '@/components/Icon.vue'
@@ -326,6 +342,8 @@ const activities = ref(null)
 const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
+const { canLog: canLogErasure } = useErasureAccess()
+const showErasureDialog = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
 
@@ -448,8 +466,19 @@ function leadCommands() {
       icon: 'repeat-2',
       perform: () => (showConvertToDealModal.value = true),
     })
+  if (canLogErasure.value) commands.push(logErasureCommand())
   if (canDelete.value) commands.push(deleteLeadCommand())
   return commands
+}
+
+function logErasureCommand() {
+  return {
+    id: 'lead-log-erasure',
+    title: 'Log erasure request',
+    group: 'Lead',
+    icon: 'user-x',
+    perform: () => (showErasureDialog.value = true),
+  }
 }
 
 function paletteContext() {

@@ -100,6 +100,13 @@
                   @click="callEnabled && makeCall(contact.doc.mobile_no)"
                 />
                 <Button
+                  v-if="canLogErasure"
+                  :label="__('Log erasure request')"
+                  size="sm"
+                  iconLeft="lucide-user-x"
+                  @click="showErasureDialog = true"
+                />
+                <Button
                   v-if="canDelete"
                   :label="__('Delete')"
                   theme="red"
@@ -163,6 +170,13 @@
     :errorTitle="errorTitle"
     :errorMessage="errorMessage"
   />
+  <LogErasureRequestDialog
+    v-if="canLogErasure"
+    v-model="showErasureDialog"
+    source-doctype="Contact"
+    :source-docname="contactId"
+    :source-doc="contact.doc"
+  />
   <DeleteLinkedDocModal
     v-if="showDeleteLinkedDocModal"
     v-model="showDeleteLinkedDocModal"
@@ -178,6 +192,8 @@
 </template>
 
 <script setup>
+import LogErasureRequestDialog from '@/components/Erasure/log-erasure-request-dialog.vue'
+import { useErasureAccess } from '@/composables/erasure-access'
 import ErrorPage from '@/components/ErrorPage.vue'
 import Resizer from '@/components/Resizer.vue'
 import Icon from '@/components/Icon.vue'
@@ -293,6 +309,8 @@ usePageMeta(() => {
   }
 })
 const showDeleteLinkedDocModal = ref(false)
+const { canLog: canLogErasure } = useErasureAccess()
+const showErasureDialog = ref(false)
 const showDealModal = ref(false)
 const dealDefaults = ref({})
 
