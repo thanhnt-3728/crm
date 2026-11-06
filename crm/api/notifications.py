@@ -5,6 +5,14 @@ from frappe.query_builder import Order
 # loading all of it took seconds for users with thousands of notifications.
 NOTIFICATIONS_PAGE_LENGTH = 50
 
+# Where a notification's reference opens: (name the panel shows, frontend route).
+# A reference to anything else, or none, has no route, so the panel doesn't navigate.
+NOTIFICATION_ROUTES = {
+	"CRM Lead": ("lead", "Lead"),
+	"CRM Deal": ("deal", "Deal"),
+	"CRM Erasure Request": ("erasure request", "ErasureRequest"),
+}
+
 
 @frappe.whitelist()
 def get_notifications():
@@ -38,6 +46,9 @@ def get_notifications():
 
 	_notifications = []
 	for notification in notifications:
+		reference_label, route_name = NOTIFICATION_ROUTES.get(notification.reference_doctype, (None, None))
+		if not notification.reference_name:
+			reference_label, route_name = None, None
 		_notifications.append(
 			{
 				"creation": notification.creation,
@@ -52,9 +63,9 @@ def get_notifications():
 				"notification_text": notification.notification_text,
 				"notification_type_doctype": notification.notification_type_doctype,
 				"notification_type_doc": notification.notification_type_doc,
-				"reference_doctype": ("deal" if notification.reference_doctype == "CRM Deal" else "lead"),
+				"reference_doctype": reference_label,
 				"reference_name": notification.reference_name,
-				"route_name": ("Deal" if notification.reference_doctype == "CRM Deal" else "Lead"),
+				"route_name": route_name,
 			}
 		)
 

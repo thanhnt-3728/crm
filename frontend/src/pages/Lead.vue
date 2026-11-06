@@ -175,6 +175,12 @@
                 />
 
                 <Button
+                  :tooltip="__('Request erasure')"
+                  icon="lucide-user-x"
+                  @click="showErasureModal = true"
+                />
+
+                <Button
                   v-if="canDelete"
                   :tooltip="__('Delete')"
                   variant="subtle"
@@ -243,6 +249,12 @@
     doctype="CRM Lead"
     :document="document"
   />
+  <LogErasureRequestModal
+    v-if="showErasureModal"
+    v-model="showErasureModal"
+    start-doctype="CRM Lead"
+    :start-name="leadId"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
@@ -263,6 +275,7 @@ import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
+import LogErasureRequestModal from '@/components/Modals/LogErasureRequestModal.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Activities from '@/components/Activities/Activities.vue'
 import AssignTo from '@/components/AssignTo.vue'
@@ -327,6 +340,7 @@ const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
+const showErasureModal = ref(false)
 const showFilesUploader = ref(false)
 
 const {
@@ -448,6 +462,7 @@ function leadCommands() {
       icon: 'repeat-2',
       perform: () => (showConvertToDealModal.value = true),
     })
+  commands.push(erasureCommand())
   if (canDelete.value) commands.push(deleteLeadCommand())
   return commands
 }
@@ -544,6 +559,17 @@ function scriptCommands() {
       icon: action.icon || 'zap',
       perform: () => action.onClick(() => {}),
     }))
+}
+
+function erasureCommand() {
+  return {
+    id: 'lead-request-erasure',
+    title: 'Request erasure',
+    group: 'Lead',
+    icon: 'user-x',
+    keywords: 'privacy delete personal data ccpa',
+    perform: () => (showErasureModal.value = true),
+  }
 }
 
 function deleteLeadCommand() {

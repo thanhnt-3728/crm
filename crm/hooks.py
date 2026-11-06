@@ -144,6 +144,7 @@ permission_query_conditions = {
 	"CRM Deal": "crm.permissions.org_hierarchy.get_deal_permission_query_conditions",
 	"CRM Notification": "crm.fcrm.doctype.crm_notification.crm_notification.get_permission_query_conditions",
 	"CRM Enrichment Run": "crm.domain_enrichment.doctype.crm_enrichment_run.crm_enrichment_run.get_permission_query_conditions",
+	"CRM Erasure Request": "crm.fcrm.doctype.crm_erasure_request.crm_erasure_request.get_permission_query_conditions",
 }
 
 has_permission = {
@@ -151,6 +152,7 @@ has_permission = {
 	"CRM Deal": "crm.permissions.org_hierarchy.has_deal_permission",
 	"CRM Notification": "crm.fcrm.doctype.crm_notification.crm_notification.has_permission",
 	"CRM Enrichment Run": "crm.domain_enrichment.doctype.crm_enrichment_run.crm_enrichment_run.has_permission",
+	"CRM Erasure Request": "crm.fcrm.doctype.crm_erasure_request.crm_erasure_request.has_permission",
 }
 
 # Automation Engine
@@ -255,7 +257,8 @@ if int(frappe.__version__.split(".")[0]) < 16:
 
 doc_events = {
 	"Contact": {
-		"validate": ["crm.api.contact.validate"],
+		"validate": ["crm.privacy.blocking.validate", "crm.api.contact.validate"],
+		"after_insert": ["crm.privacy.matching.on_record_insert"],
 	},
 	"Notification Log": {
 		"before_insert": ["crm.extends.notification_log.before_insert"],
@@ -267,6 +270,7 @@ doc_events = {
 	},
 	"Communication": {
 		"after_insert": [
+			"crm.privacy.inbound.on_communication_insert",
 			"crm.utils.on_communication_insert",
 			"crm.automation.events.on_communication",
 		],
@@ -279,6 +283,7 @@ doc_events = {
 	},
 	"WA Message": {
 		"validate": ["crm.api.whatsapp.validate"],
+		"after_insert": ["crm.privacy.inbound.on_whatsapp_insert"],
 		"on_submit": ["crm.api.whatsapp.update_reference_modified"],
 		"on_update": [
 			"crm.api.whatsapp.notify_agent",
@@ -286,12 +291,18 @@ doc_events = {
 		],
 	},
 	"CRM Deal": {
+		"validate": ["crm.privacy.blocking.validate"],
 		"on_update": [
 			"crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.create_customer_in_erpnext",
 			"crm.automation.events.on_deal_update",
+			"crm.privacy.matching.on_deal_update",
+			"crm.privacy.matching.on_deal_contacts_update",
 		],
 	},
 	"CRM Lead": {
+		"before_insert": ["crm.privacy.blocking.before_lead_insert"],
+		"validate": ["crm.privacy.blocking.validate"],
+		"after_insert": ["crm.privacy.matching.on_record_insert"],
 		"on_update": ["crm.automation.events.on_lead_update"],
 	},
 	"Sales Order": {
@@ -356,6 +367,8 @@ scheduler_events = {
 		"crm.fcrm.doctype.crm_invitation.crm_invitation.expire_invitations",
 		"crm.fcrm.doctype.crm_view_settings.crm_view_settings.clear_old_versions",
 		"crm.telemetry.capture_feature_state",
+		"crm.privacy.reminders.send_due_reminders",
+		"crm.privacy.retention.purge_expired",
 	],
 	"weekly": ["crm.api.event.trigger_weekly_event_notifications"],
 	"daily_long": ["crm.lead_syncing.background_sync.sync_leads_from_sources_daily"],

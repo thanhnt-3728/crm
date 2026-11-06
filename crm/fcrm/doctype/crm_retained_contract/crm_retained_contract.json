@@ -1,0 +1,69 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-11-05 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "person_name",
+  "contract_reference",
+  "column_break_retained",
+  "delete_after",
+  "request"
+ ],
+ "fields": [
+  {
+   "fieldname": "person_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Person Name"
+  },
+  {
+   "fieldname": "contract_reference",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Contract Reference",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_retained",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Blank: kept until counsel sets a retention period.",
+   "fieldname": "delete_after",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Delete After"
+  },
+  {
+   "description": "The erasure request number, as text: the request itself is deleted after 24 months.",
+   "fieldname": "request",
+   "fieldtype": "Data",
+   "label": "Request"
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-05 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Retained Contract",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "Compliance"
+  },
+  {
+   "read": 1,
+   "role": "System Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,870 @@
+"""Carrying out an approved erasure request (spec 5.6, 5.9, 5.11).
+
+Records: the person's leads, contacts, addresses and the deals they are still on keep
+existing as anonymized shells, so links and dashboard numbers hold. Contacts and addresses,
+whose names are built from the person's name, are renamed to the placeholder. Their change
+history and any Deleted Document copies that name the person are scrubbed too.
+
+Content (emails, calls, notes, files and the other places that hold the person's text) is
+erased by `crm.privacy.erasure_content`. `run_erasure`, the background job, runs both as
+one all-or-nothing transaction.
+
+Nothing here calls `doc.save()` on an erased record: writes go through
+`frappe.db.set_value(..., update_modified=False)` and `frappe.db.delete`, so no new
+Version row, automation or notification captures the old values.
+"""
+
+import json
+import re
+from copy import deepcopy
+from dataclasses import dataclass, field
+
+import frappe
+from frappe import _
+from frappe.utils import add_months, now_datetime, today
+from pypika.functions import Lower
+
+from crm.privacy import personal_fields, settings, system_write
+from crm.privacy.identifiers import (
+	add_do_not_contact,
+	normalize,
+	normalize_email,
+	text_contains_email,
+	text_contains_phone,
+)
+from crm.privacy.matching import active_identifiers, confirmed
+from crm.privacy.preview import TWILIO_CHECKLIST_ITEM, collect_targets
+from crm.utils import normalize_phone, phone_search_digits
+
+REQUEST = "CRM Erasure Request"
+CHECKLIST_TWILIO = TWILIO_CHECKLIST_ITEM
+
+# Deleted copies of these doctypes are removed when they name the person.
+DELETED_DOCTYPES = (
+	"CRM Lead",
+	"Contact",
+	"CRM Deal",
+	"Communication",
+	"FCRM Note",
+	"CRM Call Log",
+	"Address",
+)
+
+# Fields that hold a person's name on each record, set to the placeholder (they are
+# mandatory or shown as the record's title).
+NAME_FIELDS = {
+	"CRM Lead": ("first_name", "lead_name"),
+	"Contact": ("first_name", "full_name"),
+	"Address": ("address_title",),
+}
+
+# Personal child tables whose Version rows are scrubbed, per doctype: table fieldname ->
+# the child doctype's personal fields (None means take them from the privacy settings).
+VERSION_TABLES = {
+	"CRM Deal": {"contacts": None},
+	"Contact": {"email_ids": {"email_id"}, "phone_nos": {"phone"}},
+}
+
+# Field types blanked to NULL rather than "".
+NULL_TYPES = {
+	"Link",
+	"Dynamic Link",
+	"Attach",
+	"Attach Image",
+	"Date",
+	"Datetime",
+	"Time",
+	"Int",
+	"Float",
+	"Currency",
+	"Percent",
+	"Duration",
+}
+
+# Deal fields that identify the person when they equal the person's value: a full name, or
+# a social profile equal to the same field on the person's confirmed leads/contacts. Email
+# and phone fields identify too. Every other personal field on a deal (first or last name
+# alone, job title, gender, salutation) could just as well be another person's, so it is
+# blanked only once the deal is shown to be about the person.
+FULL_NAME_FIELDS = ("lead_name",)
+PROFILE_FIELDS = ("linkedin", "twitter", "facebook")
+
+# A phone whose national number is shorter than this matches too much free text.
+MIN_PHONE_DIGITS = 7
+
+NAME_SEPARATORS = re.compile(r"[\n,;]+")
+
+
+def placeholder_person(request_name: str) -> str:
+	"""What a person's name (or address) is replaced with."""
+	return f"Erased person {request_name}"
+
+
+def placeholder_content(request_name: str) -> str:
+	"""What erased text (subjects, message bodies, notes) is replaced with."""
+	return f"Content erased {request_name}"
+
+
+# -- What belongs to the person ----------------------------------------------------------
+
+
+@dataclass
+class _Person:
+	"""The person's values, read before anything is erased."""
+
+	emails: set[str] = field(default_factory=set)  # normalized
+	phones: set[str] = field(default_factory=set)  # normalized E.164
+	names: set[str] = field(default_factory=set)  # as typed, stripped
+	full_names: set[str] = field(default_factory=set)  # casefolded
+	# Other personal values on the confirmed leads/contacts, casefolded, by fieldname.
+	values: dict[str, set[str]] = field(default_factory=dict)
+
+	def folded_names(self) -> set[str]:
+		return {name.casefold() for name in self.names}
+
+
+def _excluded(request, kind: str) -> set[str]:
+	return {
+		normalize(kind, row.value)
+		for row in request.identifiers
+		if row.kind == kind and row.excluded and row.value
+	}
+
+
+def _person_names(request, records: list[dict]) -> set[str]:
+	"""Name strings from the confirmed records and the request's requester names.
+	Placeholders and single characters (initials) are left out."""
+	names = set()
+	for record in records:
+		for fieldname in ("first_name", "middle_name", "last_name", "lead_name", "full_name"):
+			names.add((record.get(fieldname) or "").strip())
+	names.update(part.strip() for part in NAME_SEPARATORS.split(request.requester_names or ""))
+	return {name for name in names if len(name) > 1 and not name.startswith("Erased person ")}
+
+
+def _full_names(request, records: list[dict]) -> set[str]:
+	"""The person's full names, casefolded: lead/full names, first + last name on the
+	confirmed records, and each requester name."""
+	names = set()
+	for record in records:
+		names.add(record.get("lead_name") or "")
+		names.add(record.get("full_name") or "")
+		names.add(_join_name(record.get("first_name"), record.get("middle_name"), record.get("last_name")))
+		names.add(_join_name(record.get("first_name"), record.get("last_name")))
+	names.update(NAME_SEPARATORS.split(request.requester_names or ""))
+	return {
+		name.strip().casefold()
+		for name in names
+		if len(name.strip()) > 1 and not name.strip().startswith("Erased person ")
+	}
+
+
+def _join_name(*parts) -> str:
+	return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _confirmed_records(request) -> list[dict]:
+	"""The current values of the confirmed leads and contacts."""
+	records = []
+	for doctype in ("CRM Lead", "Contact"):
+		names = confirmed(request, doctype)
+		if not names:
+			continue
+		meta = frappe.get_meta(doctype)
+		fields = ["name", *(f for f in personal_fields(doctype) if meta.has_field(f))]
+		records += frappe.get_all(doctype, filters={"name": ["in", names]}, fields=fields)
+	return records
+
+
+def _read_person(request) -> _Person:
+	records = _confirmed_records(request)
+	person = _Person(
+		emails=set(active_identifiers(request, "Email")),
+		phones=set(active_identifiers(request, "Phone")),
+		names=_person_names(request, records),
+		full_names=_full_names(request, records),
+	)
+
+	# Emails and phones on the confirmed records are the person's too, unless Compliance
+	# excluded them (a shared office number, say).
+	record_emails = {normalize_email(r.get(f)) for r in records for f in ("email", "email_id")}
+	record_phones = {normalize_phone(r.get(f)) for r in records for f in ("mobile_no", "phone")}
+	contacts = confirmed(request, "Contact")
+	if contacts:
+		for table, column, kind, found in (
+			("Contact Email", "email_id", "Email", record_emails),
+			("Contact Phone", "phone", "Phone", record_phones),
+		):
+			values = frappe.get_all(
+				table,
+				filters={"parenttype": "Contact", "parent": ["in", contacts]},
+				pluck=column,
+				parent_doctype="Contact",
+			)
+			found.update(normalize(kind, value) for value in values)
+	person.emails |= record_emails - _excluded(request, "Email") - {""}
+	person.phones |= record_phones - _excluded(request, "Phone") - {""}
+
+	for record in records:
+		for fieldname, value in record.items():
+			if fieldname != "name" and isinstance(value, str) and value.strip():
+				person.values.setdefault(fieldname, set()).add(value.strip().casefold())
+	return person
+
+
+def erase_person_values(request) -> set[str]:
+	"""The person's normalized emails and phones, plus the name strings on the confirmed
+	leads and contacts and in the requester names.
+
+	Read this before `erase_records`: afterwards the records only hold placeholders, and
+	only the emails, phones and requester names are left to find."""
+	person = _read_person(request)
+	return person.emails | person.phones | person.names
+
+
+# -- Blanking records ----------------------------------------------------------------------
+
+
+def _blank(fieldtype: str):
+	if fieldtype == "Check":
+		return 0
+	return None if fieldtype in NULL_TYPES else ""
+
+
+def _blanked_values(doctype: str, fields) -> dict:
+	"""{fieldname: blank value} for the `fields` that exist on `doctype`."""
+	meta = frappe.get_meta(doctype)
+	values = {}
+	for fieldname in fields:
+		df = meta.get_field(fieldname)
+		if df:
+			values[fieldname] = _blank(df.fieldtype)
+	return values
+
+
+def _erase_record(doctype: str, name: str, placeholder: str) -> None:
+	values = _blanked_values(doctype, personal_fields(doctype))
+	meta = frappe.get_meta(doctype)
+	for fieldname in NAME_FIELDS.get(doctype, ()):
+		if meta.has_field(fieldname):
+			values[fieldname] = placeholder
+	if values:
+		frappe.db.set_value(doctype, name, values, update_modified=False)
+
+
+def _erase_contact(name: str, placeholder: str) -> None:
+	_erase_record("Contact", name, placeholder)
+	frappe.db.delete("Contact Email", {"parent": name, "parenttype": "Contact"})
+	frappe.db.delete("Contact Phone", {"parent": name, "parenttype": "Contact"})
+
+
+def _kind_of(fieldname: str, df=None) -> str:
+	"""How a field is compared with the person's values: Email, Phone or Text."""
+	if fieldname in ("email", "email_id") or (df and df.options == "Email"):
+		return "Email"
+	if fieldname in ("mobile_no", "phone") or (df and (df.fieldtype == "Phone" or df.options == "Phone")):
+		return "Phone"
+	return "Text"
+
+
+def _is_person_row(row, contacts: set[str], person: _Person) -> bool:
+	if row.get("contact") and row.get("contact") in contacts:
+		return True
+	return normalize_email(row.get("email")) in person.emails or bool(
+		{normalize_phone(row.get("mobile_no")), normalize_phone(row.get("phone"))} & person.phones
+	)
+
+
+def _deal_identifies_person(current: dict, person: _Person) -> bool:
+	"""Whether the deal's own fields carry the person's full name or social profile."""
+	for fieldname in FULL_NAME_FIELDS:
+		if (current.get(fieldname) or "").strip().casefold() in person.full_names - {""}:
+			return True
+	if _join_name(current.get("first_name"), current.get("last_name")).casefold() in person.full_names - {""}:
+		return True
+	for fieldname in PROFILE_FIELDS:
+		value = (current.get(fieldname) or "").strip().casefold()
+		if value and value in person.values.get(fieldname, set()):
+			return True
+	return False
+
+
+def _erase_deal(name: str, contacts: set[str], person: _Person, placeholder: str) -> set[str]:
+	"""Anonymize the person's contacts rows on the deal and blank the deal's own personal
+	fields that are the person's (`_erase_deal_fields`; the deal is about the person when
+	they are its primary contact). Returns the names of the person's contacts rows."""
+	row_values = _blanked_values("CRM Contacts", personal_fields("CRM Contacts"))
+	if frappe.get_meta("CRM Contacts").has_field("full_name"):
+		row_values["full_name"] = placeholder
+	rows = frappe.get_all(
+		"CRM Contacts",
+		filters={"parent": name, "parenttype": "CRM Deal"},
+		fields=["name", "contact", "email", "mobile_no", "phone", "is_primary"],
+		parent_doctype="CRM Deal",
+	)
+	hers = [row for row in rows if _is_person_row(row, contacts, person)]
+	for row in hers:
+		if row_values:
+			frappe.db.set_value("CRM Contacts", row.name, row_values, update_modified=False)
+
+	_erase_deal_fields(name, person, about_person=any(row.is_primary for row in hers))
+	return {row.name for row in hers}
+
+
+def _erase_deal_fields(name: str, person: _Person, about_person: bool) -> None:
+	"""Blank the deal's own personal fields that are the person's.
+
+	Email and phone fields are blanked only when they hold the person's value: they are
+	copied from the deal's current primary contact, who may be someone else. The other
+	personal fields (names, job title, gender, social profiles...) are blanked when the deal
+	is about the person: `about_person`, or an email, phone, full name or social profile on
+	the deal is the person's."""
+	meta = frappe.get_meta("CRM Deal")
+	fields = [f for f in personal_fields("CRM Deal") if meta.has_field(f)]
+	if not fields:
+		return
+	current = frappe.db.get_value("CRM Deal", name, fields, as_dict=True) or {}
+
+	contact_fields = {f for f in fields if _kind_of(f, meta.get_field(f)) != "Text"}
+	matched = {
+		f
+		for f in contact_fields
+		if isinstance(current.get(f), str)
+		and _value_is_persons(_kind_of(f, meta.get_field(f)), current.get(f), person)
+	}
+	if matched or about_person or _deal_identifies_person(current, person):
+		matched |= {f for f in fields if f not in contact_fields and current.get(f) not in (None, "", 0)}
+
+	values = {f: _blank(meta.get_field(f).fieldtype) for f in matched}
+	if values:
+		frappe.db.set_value("CRM Deal", name, values, update_modified=False)
+
+
+def _erase_removed_deals(deals: list[str], leads: list[str], person: _Person) -> None:
+	"""Deals the person was taken off while the request was On Hold. Taking them off only
+	reset the deal's email and phones (from the new primary contact); a deal converted from
+	the person's lead still holds their name, job title and social profiles from it. Those go,
+	the new primary contact's email and phones stay."""
+	if not deals:
+		return
+	converted_from = dict(
+		frappe.get_all("CRM Deal", filters={"name": ["in", deals]}, fields=["name", "lead"], as_list=True)
+	)
+	leads = set(leads)
+	for deal in deals:
+		_erase_deal_fields(deal, person, about_person=converted_from.get(deal) in leads)
+
+
+def _value_is_persons(kind: str, value, person: _Person) -> bool:
+	"""Whether a single value is the person's email, phone or one of the person's names."""
+	if not isinstance(value, str) or not value.strip():
+		return False
+	if kind == "Email":
+		return normalize_email(value) in person.emails
+	if kind == "Phone":
+		return normalize_phone(value) in person.phones
+	return value.strip().casefold() in person.folded_names()
+
+
+# -- Change history ----------------------------------------------------------------------
+
+
+def _scrub_value(fieldname: str, value, placeholder: str, is_hers=None):
+	if not value or (is_hers is not None and not is_hers(fieldname, value)):
+		return value
+	return placeholder
+
+
+def _scrub_changes(changes, fields: set[str], placeholder: str, is_hers=None) -> list:
+	"""[[fieldname, old, new], ...] with the old and new values of `fields` replaced: all of
+	them, or with `is_hers(fieldname, value)` only those it accepts. Empty values stay
+	empty."""
+	scrubbed = []
+	for change in changes or []:
+		if isinstance(change, list | tuple) and len(change) == 3 and change[0] in fields:
+			fieldname, old, new = change
+			change = [
+				fieldname,
+				_scrub_value(fieldname, old, placeholder, is_hers),
+				_scrub_value(fieldname, new, placeholder, is_hers),
+			]
+		scrubbed.append(change)
+	return scrubbed
+
+
+def _rename_values(value, renames: dict[str, str]):
+	"""`value` (parsed JSON) with every string exactly equal to a key of `renames` replaced
+	by its value, at any depth."""
+	if isinstance(value, str):
+		return renames.get(value, value)
+	if isinstance(value, list | tuple):
+		return [_rename_values(item, renames) for item in value]
+	if isinstance(value, dict):
+		return {key: _rename_values(item, renames) for key, item in value.items()}
+	return value
+
+
+def scrub_version_data(
+	data: dict,
+	fields: set[str],
+	placeholder: str,
+	tables: dict[str, set[str]] | None = None,
+	renames: dict[str, str] | None = None,
+	matcher=None,
+) -> dict:
+	"""A copy of a Version's `data` with the values of personal `fields` replaced by
+	`placeholder`. `tables` maps a child table fieldname to the personal fields of its rows,
+	scrubbed in `added`, `removed` and `row_changed` entries. `renames` maps old record names
+	to new ones: a value exactly equal to an old name (a link to a renamed contact, say)
+	becomes the new name. Other changes are kept.
+
+	Without `matcher` every personal value is replaced and every old name renamed (the
+	history of the person's own records). With one, only the person's data is (a record
+	shared with others): a value when `matcher.value(fieldname, value)`, a whole table row
+	when `matcher.row(row_dict)` or, for `row_changed`, `matcher.row_name(row_name)`; in
+	other rows only the values `matcher.value` accepts. A matcher whose `names` is off is
+	for a record not tied to the person: old names are then renamed only inside the
+	person's rows, so a value that merely equals her old contact name (a namesake's lead
+	name) is left alone."""
+	tables = tables or {}
+	is_hers = matcher.value if matcher else None
+	rename_all = bool(renames) and (matcher is None or getattr(matcher, "names", True))
+	out = _rename_values(data, renames) if rename_all else deepcopy(data)
+	if "changed" in out:
+		out["changed"] = _scrub_changes(out["changed"], fields, placeholder, is_hers)
+
+	for key in ("added", "removed"):
+		for entry in out.get(key) or []:
+			# [table fieldname, row as dict]
+			if len(entry) == 2 and entry[0] in tables and isinstance(entry[1], dict):
+				row = entry[1]
+				whole_row = matcher is None or matcher.row(row)
+				if whole_row and renames and not rename_all:
+					entry[1] = row = _rename_values(row, renames)
+				for fieldname in tables[entry[0]]:
+					if row.get(fieldname) and (whole_row or is_hers(fieldname, row[fieldname])):
+						row[fieldname] = placeholder
+
+	for entry in out.get("row_changed") or []:
+		# [table fieldname, row index, row name, [[fieldname, old, new], ...]]
+		if len(entry) == 4 and entry[0] in tables:
+			whole_row = matcher is None or matcher.row_name(entry[2])
+			if whole_row and renames and not rename_all:
+				entry[3] = _rename_values(entry[3], renames)
+			entry[3] = _scrub_changes(entry[3], tables[entry[0]], placeholder, None if whole_row else is_hers)
+	return out
+
+
+def _version_tables(doctype: str) -> dict[str, set[str]]:
+	tables = {}
+	for table, fields in VERSION_TABLES.get(doctype, {}).items():
+		tables[table] = personal_fields("CRM Contacts") if fields is None else fields
+	return tables
+
+
+class _DealVersionMatcher:
+	"""Tells the person's data apart from other people's in a shared record's history.
+
+	With `names` off, a value counts as hers only when it is her email or phone: for
+	records not tied to her, where a name equal to one of hers may well be a namesake's.
+	Her table rows are still told apart by their contact, email or phone.
+
+	`meta` is the meta of the record's doctype: a custom email or phone field is compared as
+	an email or phone, not as a name."""
+
+	def __init__(self, person: _Person, contacts: set[str], rows: set[str], names: bool = True, meta=None):
+		self.person = person
+		self.contacts = contacts  # the person's contact names, old and new
+		self.rows = rows  # names of the person's contacts rows on the deal
+		self.names = names
+		self.meta = meta
+
+	def value(self, fieldname: str, value) -> bool:
+		kind = _kind_of(fieldname, self.meta.get_field(fieldname) if self.meta else None)
+		if kind == "Text" and not self.names:
+			return False
+		return _value_is_persons(kind, value, self.person)
+
+	def row(self, row: dict) -> bool:
+		return row.get("name") in self.rows or _is_person_row(row, self.contacts, self.person)
+
+	def row_name(self, name) -> bool:
+		return name in self.rows
+
+
+def _scrub_versions(
+	doctype: str, names: list[str], placeholder: str, renames: dict[str, str], matcher_for=None
+) -> None:
+	"""Scrub the Versions of `names`. `matcher_for(docname)`, when given, returns the matcher
+	that limits scrubbing to the person's data on that record."""
+	if not names:
+		return
+	fields = personal_fields(doctype)
+	tables = _version_tables(doctype)
+	versions = frappe.get_all(
+		"Version",
+		filters={"ref_doctype": doctype, "docname": ["in", names]},
+		fields=["name", "docname", "data"],
+	)
+	for version in versions:
+		try:
+			data = json.loads(version.data or "{}")
+		except ValueError:
+			continue
+		if not isinstance(data, dict):
+			continue
+		matcher = matcher_for(version.docname) if matcher_for else None
+		scrubbed = scrub_version_data(data, fields, placeholder, tables, renames, matcher)
+		if scrubbed != data:
+			frappe.db.set_value(
+				"Version",
+				version.name,
+				"data",
+				frappe.as_json(scrubbed, indent=None, separators=(",", ":")),
+				update_modified=False,
+			)
+
+
+# -- Renaming records named after the person ---------------------------------------------
+
+
+def _new_names(names: list[str], base: str) -> dict[str, str]:
+	"""{old name: new name}: `base` for the first of the sorted `names`, then `base-2`, ..."""
+	return {old: base if i == 1 else f"{base}-{i}" for i, old in enumerate(sorted(names), start=1)}
+
+
+def _rename(doctype: str, names: list[str], base: str) -> dict[str, str]:
+	"""Rename `doctype` records whose names identify the person (Contact and Address names
+	are built from the person's name) and return {old: new}. `rename_doc` carries the new
+	name into every Link and Dynamic Link, Version.docname included; the "renamed from"
+	comment it adds names the person, so it is deleted."""
+
+	def edit_comments(name):
+		return set(
+			frappe.get_all(
+				"Comment",
+				filters={"reference_doctype": doctype, "reference_name": name, "comment_type": "Edit"},
+				pluck="name",
+			)
+		)
+
+	renames = {}
+	for old, new in _new_names(names, base).items():
+		if old == new:
+			continue
+		existing = edit_comments(old)
+		frappe.rename_doc(
+			doctype,
+			old,
+			new,
+			force=True,
+			ignore_permissions=True,
+			show_alert=False,
+			rebuild_search=False,
+		)
+		renames[old] = new
+		# The comment the rename added (its text may HTML-escape the old name, so it is
+		# found as the one that was not there before).
+		added = edit_comments(new) - existing
+		if added:
+			frappe.db.delete("Comment", {"name": ["in", sorted(added)]})
+	return renames
+
+
+def _apply_renames(request, targets, renames: dict[str, str]) -> None:
+	"""Point the in-memory request and targets at the new names, so later steps (and a later
+	save of the request) do not bring the old ones back."""
+	for row in request.matches:
+		if row.reference_doctype in ("Contact", "Address") and row.reference_name in renames:
+			row.reference_name = renames[row.reference_name]
+	targets.contacts = sorted(renames.get(name, name) for name in targets.contacts)
+	targets.addresses = sorted(renames.get(name, name) for name in targets.addresses)
+
+
+def _retitle_contact_links(names, placeholder: str) -> None:
+	"""Dynamic Link rows to the renamed contacts, under any parent, keep the contact's old
+	title (its name) in `link_title`; replace it."""
+	if not names:
+		return
+	link = frappe.qb.DocType("Dynamic Link")
+	(
+		frappe.qb.update(link)
+		.set(link.link_title, placeholder)
+		.where((link.link_doctype == "Contact") & link.link_name.isin(list(names)))
+	).run()
+
+
+# -- Addresses ---------------------------------------------------------------------------
+
+
+def split_addresses(addresses: list[str], contacts) -> tuple[list[str], list[str]]:
+	"""(own, shared): addresses linked only to the person's `contacts`, and addresses also
+	linked to anyone or anything else."""
+	if not addresses:
+		return [], []
+	contacts = set(contacts)
+	links = frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Address", "parent": ["in", addresses]},
+		fields=["parent", "link_doctype", "link_name"],
+		parent_doctype="Address",
+	)
+	shared = {
+		link.parent for link in links if not (link.link_doctype == "Contact" and link.link_name in contacts)
+	}
+	return sorted(set(addresses) - shared), sorted(shared & set(addresses))
+
+
+def _unlink_shared_addresses(addresses: list[str], contacts) -> None:
+	"""Take the person's contacts off addresses others use too; the address itself stays."""
+	if not addresses or not contacts:
+		return
+	frappe.db.delete(
+		"Dynamic Link",
+		{
+			"parenttype": "Address",
+			"parent": ["in", addresses],
+			"link_doctype": "Contact",
+			"link_name": ["in", sorted(contacts)],
+		},
+	)
+
+
+# -- Deleted copies ----------------------------------------------------------------------
+
+
+def _scannable_phones(phones) -> list[str]:
+	"""Phones long enough to look for in free text without matching unrelated digits."""
+	return [p for p in phones if len(phone_search_digits(p)) >= MIN_PHONE_DIGITS]
+
+
+def _deleted_documents_naming(emails, phones) -> set[str]:
+	"""Deleted Document copies (of DELETED_DOCTYPES) whose data names one of the emails or
+	phones. Emails are prefiltered in SQL; phones can be typed any way, so every copy of the
+	listed doctypes is checked."""
+	table = frappe.qb.DocType("Deleted Document")
+
+	def copies(*conditions):
+		query = frappe.qb.from_(table).select(table.name, table.data)
+		query = query.where(table.deleted_doctype.isin(DELETED_DOCTYPES))
+		for condition in conditions:
+			query = query.where(condition)
+		return query.run(as_dict=True)
+
+	found = set()
+	for email in emails:
+		for row in copies(Lower(table.data).like(f"%{email}%")):
+			if text_contains_email(row.data, email):
+				found.add(row.name)
+
+	phones = _scannable_phones(phones)
+	if phones:
+		for row in copies():
+			if row.name not in found and any(text_contains_phone(row.data, p) for p in phones):
+				found.add(row.name)
+	return found
+
+
+# -- Entry point -------------------------------------------------------------------------
+
+
+def erase_records(request, targets) -> None:
+	"""Anonymize the leads, contacts, addresses and deals in `targets`, rename the contacts
+	and addresses (their names are the person's name), scrub the records' change history,
+	and remove deleted copies that name the person. Statuses, values and stages are
+	untouched; nothing is deleted except the contacts' email/phone rows, the person's links
+	on shared addresses, and deleted copies. Deals the person was taken off keep their
+	contacts, but their own personal fields that are the person's are blanked too.
+
+	An address also linked to someone or something else is not erased: only the person's
+	link to it is removed, and it is dropped from `targets.addresses`. `request.matches`,
+	`targets.contacts` and `targets.addresses` are updated in place to the new names, and
+	`targets.renames` is set to {old name: new name}."""
+	placeholder = placeholder_person(request.name)
+	# Read what is the person's before any of it is blanked.
+	person = _read_person(request)
+	old_contacts = set(targets.contacts)
+	own_addresses, shared_addresses = split_addresses(targets.addresses, old_contacts)
+
+	her_rows = {deal: _erase_deal(deal, old_contacts, person, placeholder) for deal in targets.deals_still_on}
+	_erase_removed_deals(targets.deals_removed_from, targets.leads, person)
+	for lead in targets.leads:
+		_erase_record("CRM Lead", lead, placeholder)
+	for contact in targets.contacts:
+		_erase_contact(contact, placeholder)
+	for address in own_addresses:
+		_erase_record("Address", address, placeholder)
+	_unlink_shared_addresses(shared_addresses, old_contacts)
+	targets.addresses = own_addresses
+
+	renames = _rename("Contact", targets.contacts, placeholder)
+	renames |= _rename("Address", targets.addresses, f"{placeholder}-Address")
+	_apply_renames(request, targets, renames)
+	targets.renames = renames
+	_retitle_contact_links(targets.contacts, placeholder)
+
+	all_contacts = old_contacts | set(targets.contacts)
+	deal_meta = frappe.get_meta("CRM Deal")
+
+	def deal_matcher(deal):
+		# Deals are shared with other contacts: only the person's data goes.
+		return _DealVersionMatcher(person, all_contacts, her_rows.get(deal, set()), meta=deal_meta)
+
+	for doctype, names, matcher_for in (
+		("CRM Lead", targets.leads, None),
+		("Contact", targets.contacts, None),
+		("CRM Deal", targets.deals_still_on, deal_matcher),
+		("Address", targets.addresses, None),
+	):
+		_scrub_versions(doctype, names, placeholder, renames, matcher_for)
+
+	deleted = _deleted_documents_naming(sorted(person.emails), sorted(person.phones))
+	if deleted:
+		frappe.db.delete("Deleted Document", {"name": ["in", sorted(deleted)]})
+
+
+# -- Content (crm.privacy.erasure_content) -----------------------------------------------
+# Imported when called: that module builds on this one.
+
+
+def erase_content(request, targets, person_values: set[str]) -> None:
+	"""Erase the emails, calls, notes, tasks, comments, files and the other places in
+	`targets` that hold the person's text (`crm.privacy.erasure_content.erase_content`).
+	`person_values` is what `erase_person_values` returned before `erase_records` ran."""
+	from crm.privacy import erasure_content
+
+	erasure_content.erase_content(request, targets, person_values)
+
+
+def erase_communications(names: list[str], request_name: str, person_values: set[str]) -> None:
+	"""Wipe the emails `names` (`crm.privacy.erasure_content.erase_communications`)."""
+	from crm.privacy import erasure_content
+
+	erasure_content.erase_communications(names, request_name, person_values)
+
+
+# -- The job -----------------------------------------------------------------------------
+
+
+def _first_line(text: str | None) -> str:
+	return next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
+
+
+def _retained_name(request, person_values: set[str]) -> str:
+	"""The person's name on a retained contract: the first requester name, or else a full
+	name read from the records before they were erased."""
+	name = _first_line(request.requester_names)
+	if name:
+		return name
+	names = sorted(value for value in person_values if "@" not in value and not value.startswith("+"))
+	return next((value for value in names if " " in value), names[0] if names else "")
+
+
+def _retain_contracts(request, person_values: set[str]) -> None:
+	"""One retained-contract entry per line of the request's contract references (5.11)."""
+	references = [line.strip() for line in (request.contract_references or "").splitlines() if line.strip()]
+	if not references:
+		return
+	months = settings().contract_retention_months or 0
+	delete_after = add_months(today(), months) if months > 0 else None
+	person_name = _retained_name(request, person_values)
+	for reference in references:
+		frappe.get_doc(
+			{
+				"doctype": "CRM Retained Contract",
+				"person_name": person_name,
+				"contract_reference": reference,
+				"delete_after": delete_after,
+				"request": request.name,
+			}
+		).insert(ignore_permissions=True)
+
+
+def _add_twilio_item(request) -> None:
+	if any(row.description == CHECKLIST_TWILIO for row in request.checklist):
+		return
+	request.append("checklist", {"description": CHECKLIST_TWILIO, "auto_added": 1, "done": 0})
+
+
+def _erase(request) -> None:
+	# The person's values are read before the records holding them are blanked.
+	person_values = erase_person_values(request)
+	targets = collect_targets(request)
+	erase_records(request, targets)
+	erase_content(request, targets, person_values)
+
+	for kind in ("Email", "Phone"):
+		for value in active_identifiers(request, kind):
+			add_do_not_contact(kind, value)
+	_retain_contracts(request, person_values)
+
+	if targets.recordings_present:
+		_add_twilio_item(request)
+	request.status = "Erased"
+	request.erased_on = now_datetime()
+	request.erasure_error = None
+	with system_write():
+		request.save(ignore_permissions=True)
+
+
+def _fail(request_name: str, error: Exception) -> None:
+	"""Undo the erasure and put the request back for sign-off with the error."""
+	from crm.privacy import erasure_content
+
+	frappe.db.rollback()
+	# A rollback to a savepoint would leave the after-commit work queued: make it inert.
+	erasure_content.cancel_after_commit_work()
+	failed = frappe.get_doc(REQUEST, request_name)
+	failed.status = "Awaiting Sign-off"
+	failed.erasure_error = str(error) or type(error).__name__
+	with system_write():
+		failed.save(ignore_permissions=True)
+	frappe.db.commit()
+
+
+def _commit(request_name: str) -> None:
+	"""Commit the erasure. Frappe runs after-commit callbacks once the SQL commit is done;
+	if one of them fails, the erasure stands: the error is logged and the erasure's own
+	file removal and re-indexing still run. Raises only when nothing was committed."""
+	from crm.privacy import erasure_content
+
+	try:
+		frappe.db.commit()
+		return
+	except Exception:
+		frappe.db.rollback()
+		if frappe.db.get_value(REQUEST, request_name, "status") != "Erased":
+			raise  # the commit itself failed
+	frappe.log_error(title=f"Erasure {request_name}: a step after the commit failed")
+	erasure_content.run_after_commit_work()
+
+
+def run_erasure(request_name: str) -> None:
+	"""The background job that carries out an approved request, all or nothing.
+
+	On success the request is `Erased` and everything is committed; files leave the disk
+	and the search index is updated only after that commit. On any error before the commit
+	the whole erasure is rolled back, the request goes back to `Awaiting Sign-off` with the
+	error in `erasure_error`, and the error is raised again for the job log. An error after
+	the commit is only logged: the erasure is done."""
+	from crm.privacy import erasure_content
+
+	request = frappe.get_doc(REQUEST, request_name)
+	if request.status != "Erasing":
+		frappe.throw(
+			_("Request {0} is {1}, not Erasing: nothing was erased.").format(request_name, request.status)
+		)
+
+	previous = frappe.flags.in_erasure_job
+	# Lets the job add the Twilio checklist item, which only Compliance may otherwise do.
+	frappe.flags.in_erasure_job = True
+	try:
+		with erasure_content.tracked_after_commit_work():
+			try:
+				_erase(request)
+				_commit(request_name)
+			except Exception as e:
+				_fail(request_name, e)
+				raise
+	finally:
+		frappe.flags.in_erasure_job = previous

@@ -110,6 +110,17 @@ const routes = [
     component: () => import('@/pages/CallLogs.vue'),
   },
   {
+    path: '/privacy-requests',
+    name: 'ErasureRequests',
+    component: () => import('@/pages/ErasureRequests.vue'),
+  },
+  {
+    path: '/privacy-requests/:requestId',
+    name: 'ErasureRequest',
+    component: () => import('@/pages/ErasureRequest.vue'),
+    props: true,
+  },
+  {
     alias: '/data-import',
     path: '/data-import/view/:viewType?',
     name: 'Data Imports',

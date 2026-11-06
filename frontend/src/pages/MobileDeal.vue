@@ -50,6 +50,11 @@
         v-if="document.actions?.length"
         :actions="document.actions"
       />
+      <Button
+        :tooltip="__('Request erasure')"
+        icon="lucide-user-x"
+        @click="showErasureModal = true"
+      />
     </div>
   </div>
   <div v-if="doc.name" class="flex h-full overflow-hidden">
@@ -272,9 +277,16 @@
     doctype="CRM Deal"
     :document="document"
   />
+  <LogErasureRequestModal
+    v-if="showErasureModal"
+    v-model="showErasureModal"
+    start-doctype="CRM Deal"
+    :start-name="dealId"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
+import LogErasureRequestModal from '@/components/Modals/LogErasureRequestModal.vue'
 import ErrorPage from '@/components/ErrorPage.vue'
 import Icon from '@/components/Icon.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
@@ -346,6 +358,7 @@ const props = defineProps({
 const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
+const showErasureModal = ref(false)
 
 const {
   triggerOnChange,

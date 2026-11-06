@@ -17,6 +17,7 @@ they run as evaluated strings in the browser.
 | Why code is the way it is (decisions, bugs fixed, history) | [ARCHIVE.md](./.pi/ARCHIVE.md) |
 | Form scripting user guide | [feats/form-scripting/guide.md](./.pi/feats/form-scripting/guide.md) |
 | formDialog() API reference | [feats/form-scripting/form-dialog.md](./.pi/feats/form-scripting/form-dialog.md) |
+| Privacy (CCPA erasure) requests — how-to, settings, manual test script | [feats/privacy-requests/guide.md](./.pi/feats/privacy-requests/guide.md) |
 
 ---
 
@@ -45,6 +46,12 @@ they run as evaluated strings in the browser.
 | `frontend/src/utils/renderFieldLayoutDialog.js` | `formDialog()` — pushes to array, returns Promise |
 | `frontend/src/components/Modals/GlobalModals.vue` | Mounts FieldLayoutDialogContainer + other app-wide modals |
 
+### Privacy requests (erasure)
+| File | Role |
+|---|---|
+| `crm/privacy/` | Erasure engine — deadlines, identifiers, matching, preview, erasure, blocking, inbound routing, reminders, retention, notifications, setup |
+| `crm/api/erasure.py` | Whitelisted endpoints — create, submit, approve, decline, close, privacy settings. Server is the authority for who may do what |
+
 ### Field transforms & validation
 | File | Role |
 |---|---|
@@ -67,7 +74,7 @@ yarn test:run      # single run
 yarn test          # watch mode
 ```
 
-- **118 tests · ~250ms** — all must pass before committing
+- **436 tests · ~25s** — all must pass before committing
 - Location: `frontend/tests/unit/`
 - Only pure utility functions are unit-tested (no Vue component tests yet)
 - Add tests in `tests/unit/` when adding pure logic to `src/utils/`

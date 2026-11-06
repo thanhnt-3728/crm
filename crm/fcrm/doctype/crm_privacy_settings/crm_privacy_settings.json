@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "head_of_compliance",
+  "contract_retention_months",
+  "hash_secret",
+  "section_break_personal_fields",
+  "personal_fields"
+ ],
+ "fields": [
+  {
+   "fieldname": "head_of_compliance",
+   "fieldtype": "Link",
+   "label": "Head of Compliance",
+   "options": "User"
+  },
+  {
+   "default": "0",
+   "description": "0 keeps retained-contract entries until counsel sets a period.",
+   "fieldname": "contract_retention_months",
+   "fieldtype": "Int",
+   "label": "Contract Retention (Months)"
+  },
+  {
+   "fieldname": "hash_secret",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Hash Secret",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_personal_fields",
+   "fieldtype": "Section Break",
+   "label": "Personal Fields"
+  },
+  {
+   "fieldname": "personal_fields",
+   "fieldtype": "Table",
+   "label": "Personal Fields",
+   "options": "CRM Personal Field"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-05 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Privacy Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Compliance",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

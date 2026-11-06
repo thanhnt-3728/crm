@@ -1,0 +1,293 @@
+{
+ "actions": [],
+ "autoname": "PDR-.####",
+ "creation": "2026-11-05 11:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "request_type",
+  "channel",
+  "received_on",
+  "logged_by",
+  "status",
+  "section_requester",
+  "requester_names",
+  "original_message",
+  "identifiers",
+  "section_matches",
+  "matches",
+  "section_checklist",
+  "checklist",
+  "contract_references",
+  "section_deadlines",
+  "acknowledgment_sent",
+  "acknowledged_on",
+  "column_break_deadlines",
+  "acknowledge_by",
+  "respond_by",
+  "section_approval",
+  "approved_by",
+  "approved_on",
+  "erased_on",
+  "erasure_error",
+  "section_outcome",
+  "answered_on",
+  "outcome",
+  "denial_reason",
+  "delete_after",
+  "section_internal",
+  "ack_reminder_sent",
+  "day30_reminder_sent",
+  "day40_alert_sent"
+ ],
+ "fields": [
+  {
+   "fieldname": "request_type",
+   "fieldtype": "Select",
+   "label": "Request Type",
+   "options": "Erasure",
+   "default": "Erasure",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Select",
+   "label": "How It Arrived",
+   "options": "Email\nPhone\nWeb form\nMail\nOther",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "received_on",
+   "fieldtype": "Date",
+   "label": "Date Received",
+   "reqd": 1,
+   "default": "Today",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "logged_by",
+   "fieldtype": "Link",
+   "label": "Logged By",
+   "options": "User",
+   "read_only": 1,
+   "set_only_once": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Logged\nAwaiting Sign-off\nOn Hold\nErasing\nErased\nDeclined\nClosed",
+   "default": "Logged",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_requester",
+   "fieldtype": "Section Break",
+   "label": "Requester"
+  },
+  {
+   "fieldname": "requester_names",
+   "fieldtype": "Small Text",
+   "label": "Requester's Name(s)"
+  },
+  {
+   "fieldname": "original_message",
+   "fieldtype": "Long Text",
+   "label": "Original Message"
+  },
+  {
+   "fieldname": "identifiers",
+   "fieldtype": "Table",
+   "label": "Identifiers",
+   "options": "CRM Erasure Identifier"
+  },
+  {
+   "fieldname": "section_matches",
+   "fieldtype": "Section Break",
+   "label": "Matched Records"
+  },
+  {
+   "fieldname": "matches",
+   "fieldtype": "Table",
+   "label": "Matches",
+   "options": "CRM Erasure Match"
+  },
+  {
+   "fieldname": "section_checklist",
+   "fieldtype": "Section Break",
+   "label": "Checklist"
+  },
+  {
+   "fieldname": "checklist",
+   "fieldtype": "Table",
+   "label": "Checklist",
+   "options": "CRM Erasure Checklist Item"
+  },
+  {
+   "fieldname": "contract_references",
+   "fieldtype": "Small Text",
+   "label": "Contract References",
+   "description": "One per line. Kept under the signed-contract exception."
+  },
+  {
+   "fieldname": "section_deadlines",
+   "fieldtype": "Section Break",
+   "label": "Deadlines"
+  },
+  {
+   "fieldname": "acknowledgment_sent",
+   "fieldtype": "Check",
+   "label": "Acknowledgment Sent"
+  },
+  {
+   "fieldname": "acknowledged_on",
+   "fieldtype": "Date",
+   "label": "Acknowledged On"
+  },
+  {
+   "fieldname": "column_break_deadlines",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "acknowledge_by",
+   "fieldtype": "Date",
+   "label": "Acknowledge By",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "respond_by",
+   "fieldtype": "Date",
+   "label": "Respond By",
+   "read_only": 1,
+   "no_copy": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_approval",
+   "fieldtype": "Section Break",
+   "label": "Approval and Erasure"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "erased_on",
+   "fieldtype": "Datetime",
+   "label": "Erased On",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "erasure_error",
+   "fieldtype": "Small Text",
+   "label": "Erasure Error",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_outcome",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "answered_on",
+   "fieldtype": "Date",
+   "label": "Date Answered"
+  },
+  {
+   "fieldname": "outcome",
+   "fieldtype": "Select",
+   "label": "Outcome",
+   "options": "\nCompleted\nPartly completed\nDenied"
+  },
+  {
+   "fieldname": "denial_reason",
+   "fieldtype": "Small Text",
+   "label": "Denial Reason"
+  },
+  {
+   "fieldname": "delete_after",
+   "fieldtype": "Date",
+   "label": "Delete After",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_internal",
+   "fieldtype": "Section Break",
+   "label": "Reminders",
+   "hidden": 1
+  },
+  {
+   "fieldname": "ack_reminder_sent",
+   "fieldtype": "Check",
+   "label": "Acknowledgment Reminder Sent",
+   "hidden": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "day30_reminder_sent",
+   "fieldtype": "Check",
+   "label": "Day 30 Reminder Sent",
+   "hidden": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "day40_alert_sent",
+   "fieldtype": "Check",
+   "label": "Day 40 Alert Sent",
+   "hidden": 1,
+   "no_copy": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-05 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Erasure Request",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Compliance",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Sales Manager"
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Sales User",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

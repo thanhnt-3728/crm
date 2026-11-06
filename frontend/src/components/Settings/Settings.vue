@@ -52,6 +52,7 @@
 </template>
 <script setup>
 import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
+import LucideLock from '~icons/lucide/lock'
 import LucideNetwork from '~icons/lucide/network'
 import LucideWorkflow from '~icons/lucide/workflow'
 import MonitorCogIcon from '~icons/lucide/monitor-cog'
@@ -75,6 +76,7 @@ import ERPNextSettings from '@/components/Settings/ERPNextSettings.vue'
 import LeadSyncSourcePage from '@/components/Settings/LeadSyncing/LeadSyncSourcePage.vue'
 import DefaultsSettings from '@/components/Settings/DefaultsSettings.vue'
 import BrandSettings from '@/components/Settings/BrandSettings.vue'
+import PrivacySettings from '@/components/Settings/PrivacySettings.vue'
 import HomeActions from '@/components/Settings/HomeActions.vue'
 import FormsSettings from '@/components/Settings/Forms/FormsSettings.vue'
 import GeneralSettings from '@/components/Settings/GeneralSettings.vue'
@@ -99,7 +101,11 @@ import ShieldCheck from '~icons/lucide/shield-check'
 import LucideZap from '~icons/lucide/zap'
 import SlaConfig from './Sla/SlaConfig.vue'
 
-const { isManager, getUser } = usersStore()
+const { isManager, isAdmin, isCompliance, getUser } = usersStore()
+
+// Privacy settings are for Compliance and System Managers (Sales Managers
+// manage the rest of System Configuration but not this page).
+const canConfigurePrivacy = () => isCompliance() || isAdmin()
 
 const user = computed(() => getUser() || {})
 
@@ -132,24 +138,34 @@ const tabs = computed(() => {
           label: __('General'),
           component: markRaw(GeneralSettings),
           icon: SettingsIcon,
+          condition: () => isManager(),
         },
         {
           label: __('Dashboard'),
           component: markRaw(DashboardSettings),
           icon: LucideLayoutDashboard,
+          condition: () => isManager(),
         },
         {
           label: __('Defaults'),
           component: markRaw(DefaultsSettings),
           icon: MonitorCogIcon,
+          condition: () => isManager(),
         },
         {
           label: __('Brand'),
           icon: SparkleIcon,
           component: markRaw(BrandSettings),
+          condition: () => isManager(),
+        },
+        {
+          label: __('Privacy'),
+          icon: LucideLock,
+          component: markRaw(PrivacySettings),
+          condition: canConfigurePrivacy,
         },
       ],
-      condition: () => isManager(),
+      condition: () => isManager() || canConfigurePrivacy(),
     },
     {
       label: __('User Management'),

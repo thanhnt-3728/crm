@@ -6,6 +6,7 @@ import OrganizationsIcon from '@/components/Icons/OrganizationsIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
+import LucideShieldCheck from '~icons/lucide/shield-check'
 import router from '@/router'
 
 export const navigationItems = [
@@ -22,8 +23,16 @@ export const navigationItems = [
   { label: 'Notes', icon: NoteIcon, route: 'Notes' },
   { label: 'Tasks', icon: TaskIcon, route: 'Tasks' },
   { label: 'Call Logs', icon: PhoneIcon, route: 'Call Logs' },
+  {
+    label: 'Privacy requests',
+    icon: LucideShieldCheck,
+    route: 'ErasureRequests',
+    desktopOnly: true,
+  },
 ]
 
+// Privacy requests are listed for every CRM user: anyone can log one, and the
+// server shows each user only the requests they may see.
 export function getNavigationItems({ mobile = false } = {}) {
   return navigationItems.filter(
     (item) => router.hasRoute(item.route) && (!mobile || !item.desktopOnly),

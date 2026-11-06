@@ -31,10 +31,11 @@
           v-if="notifications.data?.length"
           class="divide-y divide-outline-elevation-2 overflow-auto text-base"
         >
-          <RouterLink
+          <component
+            :is="notificationRoute(n) ? RouterLink : 'div'"
             v-for="n in notifications.data"
             :key="n.comment"
-            :to="getRoute(n)"
+            v-bind="linkProps(n)"
             class="flex cursor-pointer items-start gap-2.5 px-4 py-2.5 hover:bg-surface-gray-2"
             @click="markAsRead(n.comment || n.notification_type_doc)"
           >
@@ -66,7 +67,7 @@
                 {{ __(timeAgo(n.creation)) }}
               </div>
             </div>
-          </RouterLink>
+          </component>
         </div>
         <EmptyState
           v-else
@@ -92,6 +93,8 @@ import {
 } from '@/stores/notifications'
 import { globalStore } from '@/stores/global'
 import { timeAgo, sanitizeHTML } from '@/utils'
+import { notificationRoute } from '@/utils/erasureRequest'
+import { RouterLink } from 'vue-router'
 import { onClickOutside } from '@vueuse/core'
 import { useTelemetry } from '@framework/ui/telemetry'
 import { ref, onMounted, onBeforeUnmount } from 'vue'
@@ -129,20 +132,9 @@ onMounted(() => {
   $socket.on('crm_notification', () => notifications.reload())
 })
 
-function getRoute(notification) {
-  let params = {
-    leadId: notification.reference_name,
-  }
-  if (notification.route_name === 'Deal') {
-    params = {
-      dealId: notification.reference_name,
-    }
-  }
-
-  return {
-    name: notification.route_name,
-    params: params,
-    hash: notification.hash,
-  }
+// A notification with nothing to open renders as a plain row.
+function linkProps(notification) {
+  const to = notificationRoute(notification)
+  return to ? { to } : {}
 }
 </script>

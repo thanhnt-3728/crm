@@ -8,6 +8,8 @@ from pypika import Criterion
 from crm.api.doc import get_assigned_users
 from crm.fcrm.doctype.crm_notification.crm_notification import notify_user
 from crm.integrations.api import find_by_phone, find_contact_lead_or_deal_from_number
+from crm.privacy.blocking import ErasedPersonError
+from crm.privacy.inbound import ERASED_SENDER_FLAG
 from crm.utils import normalize_phone
 
 ALLOWED_WHATSAPP_ROLES = ["System Manager", "Sales Manager", "Sales User"]
@@ -49,7 +51,12 @@ def _resolve_reference(doc, phone_number: str) -> None:
 	if not name and doc.direction == "Incoming":
 		action = _lead_append_action(doc.whatsapp_account)
 		if action:
-			name, doctype = _create_lead(doc, action), "CRM Lead"
+			try:
+				name, doctype = _create_lead(doc, action), "CRM Lead"
+			except ErasedPersonError:
+				# The sender asked to be erased. The message is still saved, without a lead;
+				# Compliance is told once the message exists (privacy inbound hook).
+				doc.flags[ERASED_SENDER_FLAG] = True
 
 	if name:
 		doc.reference_doctype = doctype
