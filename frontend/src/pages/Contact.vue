@@ -100,6 +100,12 @@
                   @click="callEnabled && makeCall(contact.doc.mobile_no)"
                 />
                 <Button
+                  :label="__('Request erasure')"
+                  size="sm"
+                  iconLeft="lucide-shield-x"
+                  @click="showDataErasureModal = true"
+                />
+                <Button
                   v-if="canDelete"
                   :label="__('Delete')"
                   theme="red"
@@ -170,6 +176,13 @@
     :docname="contact.doc.name"
     name="Contacts"
   />
+  <DataErasureRequestModal
+    v-if="showDataErasureModal"
+    v-model="showDataErasureModal"
+    doctype="Contact"
+    :docname="contact.doc.name"
+    :subjectName="contact.doc.full_name"
+  />
   <DealModal
     v-if="showDealModal"
     v-model="showDealModal"
@@ -188,6 +201,7 @@ import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import DealsIcon from '@/components/Icons/DealsIcon.vue'
 import DealsListView from '@/components/ListViews/DealsListView.vue'
 import DealModal from '@/components/Modals/DealModal.vue'
+import DataErasureRequestModal from '@/components/Modals/DataErasureRequestModal.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import { validateIsImageFile, setupCustomizations } from '@/utils'
 import { useContactFields } from '@/composables/useContactFields'
@@ -236,6 +250,7 @@ const router = useRouter()
 
 const errorTitle = ref('')
 const errorMessage = ref('')
+const showDataErasureModal = ref(false)
 
 const {
   document: contact,

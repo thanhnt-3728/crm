@@ -1,0 +1,261 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-11-05 10:00:00.000000",
+ "description": "A person's request to have their personal data erased from the CRM. Logged by whoever received it; approved and run by the Privacy team.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "status",
+  "subject_section",
+  "lead",
+  "contact",
+  "column_break_subject",
+  "subject_name",
+  "subject_email",
+  "request_section",
+  "received_on",
+  "received_via",
+  "requested_by",
+  "column_break_request",
+  "acknowledge_by",
+  "acknowledged_on",
+  "respond_by",
+  "notes_section",
+  "notes",
+  "decision_section",
+  "decided_by",
+  "decided_on",
+  "column_break_decision",
+  "rejection_reason",
+  "result_section",
+  "erasure_summary"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "CRM-DER-.YYYY.-",
+   "hidden": 1
+  },
+  {
+   "default": "Pending Approval",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending Approval\nRejected\nCompleted",
+   "read_only": 1
+  },
+  {
+   "fieldname": "subject_section",
+   "fieldtype": "Section Break",
+   "label": "Person"
+  },
+  {
+   "fieldname": "lead",
+   "fieldtype": "Link",
+   "label": "Lead",
+   "options": "CRM Lead",
+   "set_only_once": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Removed when the erasure runs, since the contact record itself is deleted.",
+   "fieldname": "contact",
+   "fieldtype": "Link",
+   "label": "Contact",
+   "options": "Contact",
+   "set_only_once": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_subject",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Kept as the record of who asked, which the law requires us to retain.",
+   "fieldname": "subject_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "subject_email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "request_section",
+   "fieldtype": "Section Break",
+   "label": "Request"
+  },
+  {
+   "default": "Today",
+   "fieldname": "received_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Received On",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "default": "Email",
+   "fieldname": "received_via",
+   "fieldtype": "Select",
+   "label": "Received Via",
+   "options": "Email\nPhone\nWeb Form\nIn Person\nOther",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Logged By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_request",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "10 business days after it was received.",
+   "fieldname": "acknowledge_by",
+   "fieldtype": "Date",
+   "label": "Acknowledge By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "acknowledged_on",
+   "fieldtype": "Date",
+   "label": "Acknowledged On"
+  },
+  {
+   "description": "45 calendar days after it was received.",
+   "fieldname": "respond_by",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Respond By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "How the request reached us. Don't paste the person's message here.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes",
+   "set_only_once": 1
+  },
+  {
+   "depends_on": "eval:doc.decided_by",
+   "fieldname": "decision_section",
+   "fieldtype": "Section Break",
+   "label": "Decision"
+  },
+  {
+   "fieldname": "decided_by",
+   "fieldtype": "Link",
+   "label": "Decided By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "decided_on",
+   "fieldtype": "Datetime",
+   "label": "Decided On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_decision",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.status==\"Rejected\"",
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.status==\"Completed\"",
+   "fieldname": "result_section",
+   "fieldtype": "Section Break",
+   "label": "Result"
+  },
+  {
+   "description": "How many records of each kind were erased or de-identified.",
+   "fieldname": "erasure_summary",
+   "fieldtype": "Code",
+   "label": "Erasure Summary",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-05 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Data Erasure Request",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "if_owner": 1,
+   "read": 1,
+   "role": "Sales User"
+  },
+  {
+   "create": 1,
+   "if_owner": 1,
+   "read": 1,
+   "role": "Sales Manager"
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "CRM Privacy Officer",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [
+  {
+   "color": "Orange",
+   "title": "Pending Approval"
+  },
+  {
+   "color": "Gray",
+   "title": "Rejected"
+  },
+  {
+   "color": "Green",
+   "title": "Completed"
+  }
+ ],
+ "title_field": "subject_name",
+ "track_changes": 1
+}

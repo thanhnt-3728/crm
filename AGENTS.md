@@ -17,6 +17,7 @@ they run as evaluated strings in the browser.
 | Why code is the way it is (decisions, bugs fixed, history) | [ARCHIVE.md](./.pi/ARCHIVE.md) |
 | Form scripting user guide | [feats/form-scripting/guide.md](./.pi/feats/form-scripting/guide.md) |
 | formDialog() API reference | [feats/form-scripting/form-dialog.md](./.pi/feats/form-scripting/form-dialog.md) |
+| Personal data erasure (CCPA requests) | [feats/data-erasure/guide.md](./.pi/feats/data-erasure/guide.md) |
 
 ---
 
