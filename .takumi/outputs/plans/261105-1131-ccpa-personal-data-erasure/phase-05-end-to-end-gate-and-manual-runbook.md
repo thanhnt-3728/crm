@@ -8,7 +8,7 @@
   `frontend-tests.yml`
 
 ## Overview
-- Priority: P1 · Status: pending · Effort: 7h
+- Priority: P1 · Status: in-progress · Effort: 7h
 - Part A (runbook) depends on phase 02 only; deliver by **2026-11-27** so the Privacy team can erase
   Marisol by hand before **2026-12-10** if the feature is not live.
 - Part B (E2E gate) depends on phases 03 and 04; it is the single final gate before the December pilot.
@@ -68,9 +68,9 @@ default=str)`; compare before vs after per user.
    `hidden_copies.py` Deal filter, `jobs.py` commit order, `erasure_guards.py` status set); classify survivors.
 
 ## Todo List
-- [ ] Runbook test RED → renderer → doc committed (by 2026-11-27)
+- [x] Runbook test RED → renderer → doc committed (by 2026-11-27)
 - [ ] Staging dry-run with Privacy team + System Manager
-- [ ] Fixture + E2E test  - [ ] fault injections  - [ ] final gate  - [ ] mutation spot-check + manifest
+- [x] Fixture + E2E test  - [x] fault injections  - [ ] final gate  - [ ] mutation spot-check + manifest
 
 ## Test plan
 - Scope Contract — Changed: whole erasure subsystem (phases 01–04). Impacted: Lead/Deal/Contact delete

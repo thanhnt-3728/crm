@@ -7,7 +7,7 @@
 - Code: `crm/api/dashboard.py` (reads CRM Lead, CRM Deal, CRM Deal Status, CRM Status Change Log, User only)
 
 ## Overview
-- Priority: P1 · Status: pending · Effort: 13h · Depends on: phases 01, 02
+- Priority: P1 · Status: complete · Effort: 13h · Depends on: phases 01, 02
 - The approver re-runs discovery, sees new items flagged, excludes, types the request number; the server
   enforces the two-person rule and the hold, then a job applies the registry in one DB transaction,
   purges hidden copies, commits, deletes files, and records a PII-free outcome.
@@ -91,8 +91,8 @@ and not ids.matches_text(json.dumps(e))]`, same for `added`/`removed`/`row_chang
 6. Module run, refactor.
 
 ## Todo List
-- [ ] Bench spike recorded  - [ ] RED tests  - [ ] scrub helpers  - [ ] executor + hidden copies
-- [ ] verify oracle  - [ ] job with rollback + file stage  - [ ] approval endpoints  - [ ] GREEN
+- [x] Bench spike recorded  - [x] RED tests  - [x] scrub helpers  - [x] executor + hidden copies
+- [x] verify oracle  - [x] job with rollback + file stage  - [x] approval endpoints  - [x] GREEN
 
 ## Test plan
 - Changed: approval + execution engine. Impacted: every registry doctype's rows; dashboard endpoints

@@ -1,0 +1,59 @@
+{
+  "task": "CCPA personal data erasure: CRM Erasure Request doctype + Privacy Officer role + registry-driven discover/preview/approve/execute, Vue UI, E2E gate, manual runbook, docs (plan 261105-1131)",
+  "mode": "auto",
+  "acceptanceCriteria": [
+    "P1: Oct 26 2026 received -> ack due Nov 9 (+10 business days, day 0 excluded) and response due Dec 10 (+45 calendar days)",
+    "P1: only legal state transitions; status never writable via form save",
+    "P1: approve/reject only by Privacy Officer who is not requested_by/owner",
+    "P1: delete of Lead/Deal/Contact tied to an open request is blocked; allowed after Executed/Rejected/Closed",
+    "P1: request goes On Hold while the subject is on an open deal; returns to Pending Approval when none remain",
+    "P1: Privacy Officer role created on install and by an idempotent patch",
+    "P2: emails matched exact + case-insensitive, no substring; phones matched via normalize_phone across formats",
+    "P2: discovery finds every seeded source with exact per-doctype counts and zero near-miss hits",
+    "P2: API denies Sales User preview of others' requests and non-requester exclusions",
+    "P3: typed confirmation must equal the request name exactly; stale preview_hash rejected",
+    "P3: executor scrubs person fields, keeps kept fields and modified unchanged, writes no new Version rows",
+    "P3: hidden copies (Version, Deleted Document, __global_search, Email Queue, WA Log, Error Log, _comments) purged or filtered",
+    "P3: failure mid-run rolls back all DB changes, records last_error without PII; retry succeeds; re-run is a no-op",
+    "P3: files deleted only after commit; outcome JSON has counts/names and no identifier",
+    "P4: log dialog on Lead/Deal/Contact; list + detail pages; PO approve with exact typed confirmation; deadline highlight boundaries",
+    "P5: dashboard endpoints return identical values before/after erasure; full_scan finds zero rows with her identifiers; runbook file equals render_runbook()",
+    "P6: SPEC/ARCHIVE/guide/changelog updated with resolving links"
+  ],
+  "touchpoints": [
+    "crm/fcrm/doctype/crm_erasure_request/*",
+    "crm/fcrm/doctype/crm_erasure_identifier/*",
+    "crm/fcrm/doctype/crm_erasure_match/*",
+    "crm/erasure/*",
+    "crm/api/erasure.py",
+    "crm/hooks.py",
+    "crm/install.py",
+    "crm/patches.txt",
+    "crm/patches/v1_0/add_privacy_officer_role.py",
+    "crm/fcrm/doctype/fcrm_settings/fcrm_settings.json",
+    "frontend/src/utils/erasure-*.js",
+    "frontend/src/components/Erasure/*",
+    "frontend/src/pages/erasure-request*.vue",
+    "frontend/src/pages/Lead.vue",
+    "frontend/src/pages/Deal.vue",
+    "frontend/src/pages/Contact.vue",
+    "frontend/src/router.js",
+    "frontend/src/utils/navigation.js",
+    "docs/ccpa-manual-erasure-runbook.md",
+    ".pi/SPEC.md",
+    ".pi/ARCHIVE.md"
+  ],
+  "blastRadius": [
+    "every CRM Deal save (on_update hook)",
+    "delete of CRM Lead / CRM Deal / Contact (on_trash guard)",
+    "rows of every registry doctype for the erased person",
+    "dashboard aggregates (must not move)",
+    "activity timelines (Version purge by design)"
+  ],
+  "contracts": [
+    "crm.api.erasure.* whitelisted endpoints (type-annotated)",
+    "CRM Erasure Request state machine",
+    "REGISTRY entry shape {doctype, kind, found_by, action, fields, keep}",
+    "marker format 'Content erased <REQ-no>' / 'Erased <REQ-no>'"
+  ]
+}

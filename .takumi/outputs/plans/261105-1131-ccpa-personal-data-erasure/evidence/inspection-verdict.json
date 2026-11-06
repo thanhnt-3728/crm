@@ -1,0 +1,141 @@
+{
+  "score": 8,
+  "criticalCount": 0,
+  "decision": "SEALED",
+  "acceptanceCovered": [
+    "P1: Oct 26 2026 received -> ack due Nov 9 (+10 business days, day 0 excluded) and response due Dec 10 (+45 calendar days) — test_erasure_deadlines exit 0; due dates fixed after insert unless received_on moves (test_erasure_request_hardening exit 0)",
+    "P1: only legal state transitions; status never writable via form save — erasure_states.TRANSITIONS + check_form_save/check_new_request; test_erasure_states/test_erasure_request_integrity exit 0",
+    "P1: approve/reject only by Privacy Officer who is not requested_by/owner — assert_can_decide with stored_identity; test_approval exit 0",
+    "P1: delete of Lead/Deal/Contact tied to an open request is blocked; allowed after Executed/Rejected/Closed — block_delete_for_open_request; test_erasure_guards + E2E exit 0",
+    "P1: request goes On Hold while the subject is on an open deal; returns to Pending Approval when none remain — erasure_hold.refresh_hold; approve re-checks on replanned rows (approval.py:78-82); test_erasure_hold + test_approval_holds exit 0",
+    "P1: Privacy Officer role created on install and by an idempotent patch — install.add_privacy_officer_role + patch; fresh gate_site install exit 0",
+    "P2: emails matched exact + case-insensitive, no substring; phones matched via normalize_phone across formats — test_identifiers/test_identifier_edge_cases exit 0",
+    "P2: discovery finds every seeded source with exact per-doctype counts and zero near-miss hits — test_discovery exit 0",
+    "P2: API denies Sales User preview of others' requests and non-requester exclusions — get_preview/_assert_requester; matches at permlevel 1 stripped from REST reads for requester/Sales Manager; test_erasure_api(_privacy) + test_erasure_request_hardening exit 0",
+    "P3: typed confirmation must equal the request name exactly; stale preview_hash rejected — approval.approve; test_approval exit 0",
+    "P3: executor scrubs person fields, keeps kept fields and modified unchanged, writes no new Version rows — record_writes update_modified=False; E2E + fault injection",
+    "P3: hidden copies (Version, Deleted Document, __global_search, Email Queue, WA Log, Error Log, _comments) purged or filtered — hidden_copies.HANDLERS; test_hidden_copies exit 0",
+    "P3: failure mid-run rolls back all DB changes, records last_error without PII; retry succeeds; re-run is a no-op — jobs.execute_request; test_jobs/test_job_safety exit 0",
+    "P3: files deleted only after commit; outcome JSON has counts/names and no identifier; pending disk files persisted as path hashes in outcome.pending_files in the Executed transaction — post_commit + jobs._outcome; E2E + test_job_safety exit 0",
+    "P4: log dialog on Lead/Deal/Contact; list + detail pages; PO approve with exact typed confirmation; deadline highlight boundaries; Retry after JOB_TIMEOUT on a stalled job — components reviewed; vitest erasure utils exit 0",
+    "P5: dashboard endpoints return identical values before/after erasure; full_scan finds zero rows with her identifiers; runbook file equals render_runbook() — test_end_to_end/test_runbook exit 0",
+    "P6: SPEC/ARCHIVE/guide/changelog updated with resolving links — SPEC:378 now lists identifiers_not_on_subject"
+  ],
+  "regressionChecked": [
+    "CRM Deal on_update cost: single exists() when no request in Pending/On Hold",
+    "Lead/Deal/Contact delete and rename with no erasure request: early exit via has_requests_in",
+    "Contact validate hook unchanged; new on_trash/before_rename/after_rename only",
+    "install/migrate: idempotent role creation, patch in post_model_sync, FCRM Settings field additive; fresh site install exit 0",
+    "full app suite: 12 failures identical to HEAD baseline",
+    "frontend nav/router/command palette role gating"
+  ],
+  "contractStatus": "CHANGED",
+  "refuted": [],
+  "unproven": [],
+  "reachableRegressions": [],
+  "findings": [
+    {
+      "severity": "High",
+      "category": "Security",
+      "location": "crm/fcrm/doctype/crm_erasure_request/erasure_form_save_rules.py:63",
+      "summary": "addressed — Requester can replace all identifiers/source of a Draft via plain save, bypassing log_request's identifier-on-source check; refresh_matches then runs discovery for a stranger's email (probe confirmed). Lock these fields to the set_identifiers seam and re-check at submit/refresh.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Medium",
+      "category": "Correctness",
+      "location": "crm/erasure/approval.py:67-77",
+      "summary": "addressed — approve's hold re-check uses pre-replan stored matches; an open deal found only by re-discovery is approved, then the job errors and the request stays Approved instead of On Hold. Check blocking_open_deals on the replanned rows.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Medium",
+      "category": "Security",
+      "location": "crm/fcrm/doctype/crm_erasure_request/crm_erasure_request.json:163",
+      "summary": "addressed — REST doc read returns the full matches table (incl. records the caller cannot read) to requester and Sales Manager, bypassing preview's readability filter. Put matches at permlevel 1.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Medium",
+      "category": "Data leakage",
+      "location": "crm/erasure/post_commit.py:30-38",
+      "summary": "addressed — Pending disk-file list only in Redis (allkeys-lru); eviction or restart leaves PII-named files on disk with no DB pointer. Persist durably without PII.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Medium",
+      "category": "Data integrity",
+      "location": "crm/fcrm/doctype/crm_erasure_request/crm_erasure_request.json:239",
+      "summary": "addressed — System Manager can delete erasure requests: destroys the audit record of executed erasures and creates Deleted Document copies holding identifiers. Add an on_trash guard.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Medium",
+      "category": "Data leakage",
+      "location": "crm/erasure/approval.py:84-90",
+      "summary": "addressed — Rejected requests keep full identifiers and subject name indefinitely; retention runs only on Close.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Medium",
+      "category": "Error boundaries",
+      "location": "frontend/src/utils/erasure-actions.js:33",
+      "summary": "addressed — Approved request whose job died without last_error polls forever with no Retry; show Retry after JOB_TIMEOUT.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Low",
+      "category": "Docs",
+      "location": ".pi/SPEC.md:378",
+      "summary": "addressed — Preview payload omits identifiers_not_on_subject (also crm/api/erasure.py docstring).",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Low",
+      "category": "Correctness",
+      "location": "crm/fcrm/doctype/crm_erasure_request/crm_erasure_request.py:93",
+      "summary": "addressed — Due dates recomputed on every save with the current holiday list; deadlines of open requests drift silently.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Low",
+      "category": "Backwards compatibility",
+      "location": "crm/fcrm/doctype/crm_erasure_request/erasure_guards.py:75",
+      "summary": "addressed — follow_rename runs UPDATEs on every rename without a table-missing guard.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Low",
+      "category": "UX",
+      "location": "frontend/src/components/CommandPalette/useCRMCommands.js:285",
+      "summary": "addressed — Roles snapshot can hide Erasure nav item before roles load.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Low",
+      "category": "Error boundaries",
+      "location": "crm/erasure/jobs.py:97",
+      "summary": "addressed — Worker death between the Executed commit and _after_commit leaves outcome.pending_files non-empty with no last_error, so nothing prompts an operator to run finish_files. Set a pending-files last_error hint in the Executed transaction when pending_files is non-empty and clear it once deleted.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Low",
+      "category": "Data leakage",
+      "location": "crm/erasure/post_commit.py:30",
+      "summary": "addressed — outcome.pending_files holds unsalted sha256 of predictable site paths (file names may spell her email) at permlevel 0; a requester or Sales Manager can confirm a guessed name. Salt with request name plus site secret, or keep the hashes at permlevel 1.",
+      "disposition": "Accept"
+    },
+    {
+      "severity": "Low",
+      "category": "UX",
+      "location": "frontend/src/components/Erasure/erasure-request-notices.vue:26",
+      "summary": "The pending-files hint is shown as a red 'Last error:' box on an Executed request, with a bench command visible to every viewer. Not harmful (Retry and polling stay Approved-only) but misleading; show a neutral 'cleanup pending' label for Executed/Closed or hide the command from non-officers.",
+      "disposition": "Accept"
+    }
+  ],
+  "riskGate": {
+    "touchesSensitiveArea": true,
+    "signoffRequired": true,
+    "humanSignedOff": false
+  }
+}

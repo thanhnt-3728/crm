@@ -1,7 +1,7 @@
 ---
 title: "CCPA personal data erasure"
 description: "Reps log a person's erasure request in the CRM; a Privacy Officer approves; a registry-driven service anonymizes her data without moving dashboard numbers."
-status: pending
+status: in-progress
 priority: P1
 effort: 48h
 branch: develop
@@ -24,12 +24,12 @@ the delete guard are enforced in Python. Safety-critical: tests first, whole era
 ## Phases
 | # | Phase | Status | Effort | Depends on |
 |---|---|---|---|---|
-| 1 | [Request doctype, role, states, deadlines, delete guard](./phase-01-request-doctype-role-states-guards.md) | Pending | 7h | — |
-| 2 | [Erasure registry and discovery](./phase-02-erasure-registry-and-discovery.md) | Pending | 9h | 1 |
-| 3 | [Approval, execution and hidden copies](./phase-03-approval-execution-and-hidden-copies.md) | Pending | 13h | 1, 2 |
-| 4 | [Vue log dialog and request pages](./phase-04-vue-log-dialog-and-request-pages.md) | Pending | 10h | 2 (3 for approve wiring; parallel with 3, frontend files only) |
-| 5 | [End-to-end gate and manual runbook](./phase-05-end-to-end-gate-and-manual-runbook.md) | Pending | 7h | Part A: 2 · Part B: 3, 4 |
-| 6 | [Docs: SPEC, archive, changelog, guide](./phase-06-docs-spec-and-changelog.md) | Pending | 2h | 5 |
+| 1 | [Request doctype, role, states, deadlines, delete guard](./phase-01-request-doctype-role-states-guards.md) | Complete | 7h | — |
+| 2 | [Erasure registry and discovery](./phase-02-erasure-registry-and-discovery.md) | Complete | 9h | 1 |
+| 3 | [Approval, execution and hidden copies](./phase-03-approval-execution-and-hidden-copies.md) | Complete | 13h | 1, 2 |
+| 4 | [Vue log dialog and request pages](./phase-04-vue-log-dialog-and-request-pages.md) | In Progress | 10h | 2 (3 for approve wiring; parallel with 3, frontend files only) |
+| 5 | [End-to-end gate and manual runbook](./phase-05-end-to-end-gate-and-manual-runbook.md) | In Progress | 7h | Part A: 2 · Part B: 3, 4 |
+| 6 | [Docs: SPEC, archive, changelog, guide](./phase-06-docs-spec-and-changelog.md) | Complete | 2h | 5 |
 
 ## Key dependencies and milestones
 - Frappe v16 (CI also runs a version-15 lane) · `whatsapp` app (`WA Message`/`WA Profile`/`WA Log`) ·

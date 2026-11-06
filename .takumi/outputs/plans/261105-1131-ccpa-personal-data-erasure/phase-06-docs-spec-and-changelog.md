@@ -6,7 +6,7 @@
 - Consultation report (rationale to archive), phases 01–05
 
 ## Overview
-- Priority: P2 · Status: pending · Effort: 2h · Depends on: phase 05 (documents what shipped)
+- Priority: P2 · Status: complete · Effort: 2h · Depends on: phase 05 (documents what shipped)
 
 ## Key Insights
 - SPEC holds only stable contracts: the registry entry shape, API endpoints, states, guard rules.
@@ -36,7 +36,7 @@ the generated copy from phase 05.
 3. Changelog entry; check every relative link resolves.
 
 ## Todo List
-- [ ] SPEC section  - [ ] ARCHIVE decision record  - [ ] feature guide  - [ ] changelog  - [ ] link check
+- [x] SPEC section  - [x] ARCHIVE decision record  - [x] feature guide  - [x] changelog  - [x] link check
 
 ## Test plan
 - Changed: Markdown only. Check: links resolve (`grep -o '](\./[^)]*)'` + file existence); no code tests.

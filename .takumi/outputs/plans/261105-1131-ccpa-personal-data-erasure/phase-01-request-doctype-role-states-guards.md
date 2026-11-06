@@ -7,7 +7,7 @@
 - Test pattern: `crm/fcrm/doctype/crm_lead/test_crm_lead.py` (`IntegrationTestCase`, rollback in tearDown)
 
 ## Overview
-- Priority: P1 · Status: pending · Effort: 7h · Depends on: none
+- Priority: P1 · Status: complete · Effort: 7h · Depends on: none
 - The record of a request and every rule that does not need the erasure engine: who may move it, its
   dates, the On Hold rule, and the block on deleting a Lead/Deal/Contact tied to an open request.
 
@@ -85,11 +85,11 @@ naming the request.
 7. Run module tests → GREEN; refactor.
 
 ## Todo List
-- [ ] Tests written and RED recorded
-- [ ] Child + parent doctypes, permissions
-- [ ] Deadlines, states, hold, delete guard modules
-- [ ] hooks / install / patch / settings field
-- [ ] Module tests GREEN
+- [x] Tests written and RED recorded
+- [x] Child + parent doctypes, permissions
+- [x] Deadlines, states, hold, delete guard modules
+- [x] hooks / install / patch / settings field
+- [x] Module tests GREEN
 
 ## Test plan
 - Changed: new doctype + 4 modules; hooks `on_trash`, `CRM Deal.on_update`; role install; settings field.

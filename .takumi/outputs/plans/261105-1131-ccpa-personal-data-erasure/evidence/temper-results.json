@@ -1,0 +1,200 @@
+{
+  "commands": [
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_approval",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 13,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_discovery",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 10,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_end_to_end",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 1,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_erasure_api",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 8,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_erasure_api_privacy",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 9,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_erasure_exclusions",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 6,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_executor",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 4,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_hidden_copies",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 8,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_identifier_edge_cases",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 10,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_identifiers",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 17,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_job_safety",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 6,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_jobs",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 8,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_record_renames",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 8,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_registry_integrity",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 10,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_retention",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 3,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_runbook",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 13,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.erasure.test_scrub_actions",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 9,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_crm_erasure_request",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 13,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_erasure_deadlines",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 4,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_erasure_guards",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 7,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_erasure_hold",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 12,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_erasure_request_integrity",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 10,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_erasure_request_permissions",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 2,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_erasure_request_seam_rows",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 6,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_erasure_request.test_erasure_states",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 2,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_deal.test_crm_deal",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 41,
+      "summary": "OK"
+    },
+    {
+      "command": "bench --site gate_site run-tests --app crm --module crm.fcrm.doctype.crm_lead.test_crm_lead",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 27,
+      "summary": "OK"
+    },
+    {
+      "command": "cd frontend && yarn vitest run tests/unit/filesUploader.test.js tests/unit/erasure-actions.test.js tests/unit/erasure-matches.test.js tests/unit/erasure-deadlines.test.js tests/unit/erasure-display-date.test.js tests/unit/navigation.test.js",
+      "exitCode": 0,
+      "phase": "GREEN",
+      "testCount": 88,
+      "summary": "6 files, 88 passed (final tree)"
+    }
+  ]
+}

@@ -9,7 +9,7 @@
 - Test rules: `.pi/SPEC.md` → Testing (pure utils in `src/utils`, vitest, `@/` alias)
 
 ## Overview
-- Priority: P1 · Status: pending · Effort: 10h · Depends on: phase 02 (log/preview API); phase 03 for the
+- Priority: P1 · Status: in-progress · Effort: 10h · Depends on: phase 02 (log/preview API); phase 03 for the
   approve/reject wiring. May run in parallel with phase 03 once phase 02's API signatures are merged
   (frontend files only; no shared files with phase 03).
 - The rep logs the request from the person's page; reps and Privacy Officers track it on a list page;
@@ -77,8 +77,8 @@ excluded, preview_hash)` → status Approved → poll doc until Executed (realti
 6. `yarn test:run`, build (`yarn build`) to catch compile errors.
 
 ## Todo List
-- [ ] Util tests RED  - [ ] utils GREEN  - [ ] dialog + list component  - [ ] page actions
-- [ ] list/detail pages + routes + nav  - [ ] approve dialog  - [ ] build + tests GREEN
+- [x] Util tests RED  - [x] utils GREEN  - [x] dialog + list component  - [x] page actions
+- [x] list/detail pages + routes + nav  - [x] approve dialog  - [ ] build + tests GREEN
 
 ## Test plan
 - Changed: 2 utils, 5 components/pages, 3 page edits, router, navigation. Impacted: `navigation.test.js`

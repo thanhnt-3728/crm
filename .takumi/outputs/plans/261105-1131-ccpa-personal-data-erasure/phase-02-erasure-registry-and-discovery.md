@@ -9,7 +9,7 @@
   calls/notes/tasks link via `reference_*` and `Dynamic Link`); `crm/hooks.py:16,280` (whatsapp app, `WA Message`)
 
 ## Overview
-- Priority: P1 · Status: pending · Effort: 9h · Depends on: phase 01
+- Priority: P1 · Status: complete · Effort: 9h · Depends on: phase 01
 - One declarative table says where a person's data lives and what happens to it. Discovery walks that table
   for a request and returns match rows (doc names only); the rep reviews and excludes, then submits.
 
@@ -105,8 +105,8 @@ Data flow: rep dialog → `log_request` → insert request (identifiers) → `di
 6. GREEN, refactor, module run.
 
 ## Todo List
-- [ ] RED tests  - [ ] identifiers  - [ ] registry + integrity test  - [ ] queries  - [ ] discovery + diff
-- [ ] API endpoints with permission checks  - [ ] GREEN
+- [x] RED tests  - [x] identifiers  - [x] registry + integrity test  - [x] queries  - [x] discovery + diff
+- [x] API endpoints with permission checks  - [x] GREEN
 
 ## Test plan
 - Changed: new package + API. Impacted: none at runtime until phase 03 executes. Risk: **safety-critical**
