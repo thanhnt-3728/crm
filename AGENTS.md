@@ -51,6 +51,15 @@ they run as evaluated strings in the browser.
 | `frontend/src/utils/fieldTransforms.js` | `processField()`, `findMissingMandatory()`, `parseLinkFilters()` — pure, tested |
 | `frontend/src/utils/expressions.js` | `evaluateDependsOnValue()`, `evaluateExpression()` |
 
+### Personal data erasure (CCPA)
+| File | Role |
+|---|---|
+| `crm/api/erasure.py` | Whitelisted POST-only endpoints (`crm.api.erasure.*`); re-exports `crm/erasure/approval.py` |
+| `crm/erasure/` | Registry-driven discovery, preview, approval, executor, retention, runbook generator, backend tests |
+| `frontend/src/pages/erasure-requests.vue`, `erasure-request.vue` | List and detail pages (routes `/erasure-requests`, `/erasure-requests/:name`) |
+
+Contract: SPEC.md "Personal Data Erasure". User guide: [feats/personal-data-erasure/guide.md](./.pi/feats/personal-data-erasure/guide.md).
+
 ### Meta & stores
 | File | Role |
 |---|---|
@@ -67,7 +76,7 @@ yarn test:run      # single run
 yarn test          # watch mode
 ```
 
-- **118 tests · ~250ms** — all must pass before committing
+- Fast single run (count changes often) — all must pass before committing
 - Location: `frontend/tests/unit/`
 - Only pure utility functions are unit-tested (no Vue component tests yet)
 - Add tests in `tests/unit/` when adding pure logic to `src/utils/`

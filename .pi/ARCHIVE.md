@@ -168,3 +168,44 @@ Three patterns were considered:
 
 > Current stable API: [SPEC.md — formDialog API](./SPEC.md#formdialog-api)  
 > Full guide with examples: [feats/form-scripting/form-dialog.md](./feats/form-scripting/form-dialog.md)
+
+
+---
+
+## CCPA Personal Data Erasure
+
+> **Completed (pending pilot).** Reps log an erasure request from a Lead, Deal or Contact; a Privacy Officer approves; a registry-driven job anonymizes her data without moving dashboard numbers. Contract: [SPEC.md](./SPEC.md#personal-data-erasure). User guide: [feats/personal-data-erasure/guide.md](./feats/personal-data-erasure/guide.md).
+
+### Paths considered
+
+| Path | What | Verdict |
+|---|---|---|
+| **A** (chosen) | New request doctype + declarative registry; anonymize Lead/Deal/Contact in place, keep activity rows with a marker, purge hidden copies | Counts and dashboards stay; one list to review when a doctype is added |
+| B | Delete her records (Frappe delete) | Moves dashboard numbers, leaves Version, Deleted Document, search and queue copies behind, orphans activity |
+| C | Manual runbook only | Kept as the fallback, generated from the same registry ([runbook](../docs/ccpa-manual-erasure-runbook.md)); does not scale to all reps |
+
+Full reasoning: `.takumi/outputs/reports/261105-1111-personal-data-erasure-consultation.md`.
+
+### Decisions
+
+- **Activity is not deleted.** Emails, comments, calls, notes, tasks and WhatsApp rows stay; content becomes `Content erased <REQ-no>`, names `Erased <REQ-no>`. Reports keep their numbers.
+- **Files are deleted permanently** (no Deleted Document copy), after the database commit. A file on disk shared with a record that is not hers is kept (known limitation).
+- **Two-person rule in Python.** A Privacy Officer who logged the request, or owns it, cannot approve or reject it. The UI hiding the button is a convenience only.
+- **Typed confirmation and stale-preview guard.** Approval needs the exact request number and a `preview_hash` of every match; if matches changed since the preview, approval fails and the preview reloads. Records found since logging must be ticked as reviewed in the UI.
+- **Hold rule.** A request waits On Hold while an open deal is tied to the person; deadlines keep running. It is re-checked at approval.
+- **Delete and rename guard** on Lead, Deal and Contact while a request is open, so a record cannot slip out from under an approved erasure.
+- **Registry-driven.** Discovery, executor, verification and the manual runbook all read `crm/erasure/registry.py`. Adding a source is one entry.
+- **Failure leaves Approved, never half-erased.** The job rolls back, stores `last_error` without values and `retry_execution` runs it again. A residual check fails the job if her identifiers remain in a registered table.
+- **Retention** is one function (`apply_retention`): masked identifiers, request number and dates kept (proposed for CCPA 24-month record keeping), name dropped; applied at both Close and Reject. Not yet confirmed by the Privacy team.
+- **Privacy Officer role is additive**, not a replacement for a CRM role; created on install and by patch for existing sites.
+
+### Known limitations and unproven areas
+
+- Residual limits are listed in `KNOWN_LIMITATIONS` in `crm/erasure/registry.py`; they are stored on every Executed request.
+- MariaDB only. **Postgres is unproven.**
+- Runtime on a large site (about 1M rows) is not measured.
+- The CI version-15 lane has not been run against this feature.
+- Backups are out of scope: her data stays there until they rotate out.
+- The manual runbook has not had a dry run by the Privacy team on staging.
+
+Follow-ups are in [PLAN.md](./PLAN.md#ccpa-erasure-follow-ups).

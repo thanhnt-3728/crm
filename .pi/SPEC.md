@@ -19,6 +19,7 @@
 7. [formDialog API](#formdialog-api)
 8. [Available Helpers](#available-helpers)
 9. [Testing](#testing)
+10. [Personal Data Erasure](#personal-data-erasure)
 
 ---
 
@@ -322,3 +323,94 @@ describe('processField', () => {
 ```
 
 > See `tests/setup.js` for available globals (`__`, `window.sysdefaults`)
+
+---
+
+## Personal Data Erasure
+
+> Contract of the CCPA erasure feature. User steps: [feats/personal-data-erasure/guide.md](./feats/personal-data-erasure/guide.md). Why it is built this way: [ARCHIVE.md](./ARCHIVE.md#ccpa-personal-data-erasure).
+
+### Registry entry
+
+The registry is the single list of where a person's data lives. Its table is **not** copied here: read [`crm/erasure/registry.py`](../crm/erasure/registry.py) (entries in `registry_subject_entries.py` and `registry_activity_entries.py`), the shapes in [`crm/erasure/registry_model.py`](../crm/erasure/registry_model.py), and the generated manual copy [docs/ccpa-manual-erasure-runbook.md](../docs/ccpa-manual-erasure-runbook.md).
+
+An `Entry` has `doctype`, `kind` (`person`, `activity`, `file`, `hidden`), `found_by` (text for the runbook), `finders`, `action` and per-field treatments. Adding a data source means adding an entry.
+
+| Action | Effect |
+|---|---|
+| `scrub` | anonymize the listed fields in place, keep the row |
+| `replace_content` | keep the row, overwrite its content with the content marker |
+| `delete_permanently` | delete with no Deleted Document copy (files: after commit) |
+| `purge` | delete a hidden copy outright |
+| `filter_entries` | Version rows: drop only the entries that carry her data |
+| `unlink` | shared record (an Address of several people): drop her link row only |
+| `rewrite_comments` | `_comments` column: keep entries that hold only a name |
+
+Field treatments: `clear`, `marker`, `name_marker`, `remove_address`, `clear_if_hers`, `marker_if_hers`, `delete_rows`, `drop_her_links`.
+
+**Markers**: `content_marker(REQ)` is `Content erased <REQ-no>`; `name_marker(REQ)` is `Erased <REQ-no>`. Activity rows (emails, comments, calls, notes, tasks, WhatsApp) are kept so counts and dashboards do not move; only their content changes.
+
+Residual limits are listed in `KNOWN_LIMITATIONS` in `registry.py`. Each Executed request stores them (`known_limitations`) and its page shows them.
+
+### Request doctype `CRM Erasure Request`
+
+Named `CRM-ERQ-.YYYY.-<n>`. Child tables: `CRM Erasure Identifier` (kind Email or Phone, value, normalized) and `CRM Erasure Match` (`ref_doctype`, `ref_name`, reason, action, excluded, new_since_logging). Deadlines (`erasure_deadlines.py`): `ack_due` is 10 business days after `received_on`, `response_due` is 45 calendar days. Holidays come from `FCRM Settings.erasure_holiday_list` (Link to `CRM Holiday List`); empty means weekends only.
+
+Role `Privacy Officer` is additive (created by `crm/install.py` and patch `crm.patches.v1_0.add_privacy_officer_role`); holders also need a CRM role. DocType permissions: System Manager full; Sales User create, and read/write own; Sales Manager read (cannot log); Privacy Officer read and write. The `matches` table is permlevel 1: over REST only Privacy Officer and System Manager see match rows, requesters use `get_preview`. After logging, `identifiers`, `source_doctype` and `source_docname` cannot be changed by a form or REST save; `refresh_matches` and `submit_for_approval` re-check that at least one identifier is on the source ("None of the identifiers of <REQ> is on <doctype> <name>"). Only a Draft request can be deleted (audit record; its Deleted Document copy holds no identifiers). Due dates are computed on insert and when `received_on` changes only.
+
+### States (`erasure_states.py`, `TRANSITIONS`)
+
+| From | To | Actor |
+|---|---|---|
+| Draft | Pending Approval, or On Hold | requester |
+| Pending Approval | On Hold (and back) | system (hold rule) |
+| Pending Approval | Approved | decider |
+| Approved | Executed | system (execution job) |
+| Executed | Closed | any Privacy Officer |
+| Draft, Pending Approval, On Hold | Rejected | decider |
+
+Decider: a Privacy Officer who is neither `requested_by` nor `owner` (two-person rule, checked against stored values and `frappe.session.user`). Open states, which block delete and rename: Draft, Pending Approval, On Hold, Approved. Closed and Rejected are terminal.
+
+**Hold rule** (`erasure_hold.py`): while a request is Pending Approval or On Hold and her Lead, Deal or Contact is tied to a deal whose status type is not Won or Lost, the request is On Hold (deadlines keep running). It re-evaluates on Deal update and delete, and `approve` re-checks it before and after re-planning matches. If an open deal is found it moves the request to On Hold, commits, and throws the hold error.
+
+### API
+
+Endpoints live in `crm/api/erasure.py` and `crm/erasure/approval.py`. All are POST-only and whitelisted as `crm.api.erasure.<name>`. Match keys are `"<ref_doctype>::<ref_name>"`. Previews return `{name, status, hold_reason, ack_due, response_due, groups[{doctype, count, excluded, unreadable, rows[...]}], hidden, identifiers_not_on_subject[{kind, position}]}` (also from `get_preview` and `get_approval_preview`); identifiers are never echoed, only their position.
+
+| Endpoint | Who may call it |
+|---|---|
+| `log_request(source_doctype, source_docname, subject_name, received_on, emails, phones)` | user with create on the doctype who can read the source; one identifier must be on the source |
+| `refresh_matches(name)` | Draft: its requester; Pending Approval or On Hold: a decider; otherwise refused |
+| `set_exclusions(name, excluded)` | requester, Draft only |
+| `submit_for_approval(name)` | requester (Draft to Pending Approval, or On Hold) |
+| `get_preview(name)` | requester or a Privacy Officer |
+| `get_approval_preview(name)` | decider, Pending Approval or On Hold; adds `preview_hash` |
+| `approve(name, confirm_name, excluded, preview_hash)` | decider; `confirm_name` must equal the request number; a stale hash raises `ErasurePreviewStale` |
+| `reject(name, reason)` | decider; reason required; applies the same retention as Close in the same transaction |
+| `close(name)` | any Privacy Officer; Executed only; applies retention |
+| `retry_execution(name)` | any Privacy Officer; Approved only; queues the job again |
+
+The acknowledgement date is saved with `frappe.client.set_value` on `acknowledged_on` (editable after Draft).
+
+### Execution
+
+`approve` queues `crm.erasure.jobs.execute_request` (long queue, one job per request, after commit). One transaction does the database work in registry order, runs a residual check and marks the request Executed with an `outcome`; files are deleted after the commit and global search is re-indexed. A failure rolls back, records `last_error` (exception class and doctype, never a value) and leaves the request Approved so `retry_execution` can run it again.
+
+### Guards (`erasure_guards.py`, wired in `crm/hooks.py`)
+
+- Lead, Deal and Contact: `on_trash` refuses delete while an open request points at the record; `before_rename` refuses rename or merge (only the execution job may rename her Contact and Address); `after_rename` rewrites references of decided requests.
+- Deal `on_update` and `on_trash` feed the hold rule.
+
+`outcome` carries `pending_files` (sha256 of site-relative paths; empty when done). To retry disk deletion, also on Closed requests: `bench --site <site> execute crm.erasure.post_commit.finish_files --kwargs "{'name': '<REQ>'}"`.
+
+### Retention seam
+
+`crm/erasure/retention.py` `apply_retention(request)` runs at Close and at Reject, and is the one place that decides what a request keeps. Current behavior: masked emails and phones, request number and dates kept; the subject name is replaced by the name marker.
+
+### Tests
+
+```bash
+bench --site test_site run-tests --app crm --module crm.erasure.test_end_to_end
+# all backend modules: crm/erasure/test_*.py and crm/fcrm/doctype/crm_erasure_request/test_*.py
+cd frontend && yarn test:run   # includes erasure-actions, erasure-deadlines, erasure-display-date, erasure-matches
+```

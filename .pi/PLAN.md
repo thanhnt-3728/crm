@@ -274,3 +274,20 @@ this.field('lost_reason')
 5. **Incremental, independently shippable** — Each phase merges and is usable on its own.
 
 6. **Extensibility via records** — Third-party apps extend via `CRM Form Script` records. No source code modification. Multiple scripts per doctype run sequentially; last-write-wins for overrides.
+
+
+---
+
+## CCPA Erasure Follow-ups
+
+> Feature shipped and documented: [ARCHIVE](./ARCHIVE.md#ccpa-personal-data-erasure), [SPEC](./SPEC.md#personal-data-erasure).
+
+| Follow-up | Owner | Note |
+|---|---|---|
+| Decide what a request retains after Close | Privacy team (Dana) | Change only `apply_retention()` in `crm/erasure/retention.py` |
+| Confirm where the Privacy Officer works | Privacy team | Default is the CRM pages `Erasure Requests`; the Desk form stays for admins |
+| Decide whether Sales User keeps global delete on Lead and Deal | Sales (Priya) | Separate decision; the feature only blocks delete while a request is open |
+| Run the CI version-15 lane | Dev | Not run against the erasure code yet |
+| Prove or exclude Postgres | Dev | Discovery, verification and the runbook SQL are MariaDB only |
+| Measure runtime at about 1M rows | Dev | Discovery and the residual check scan tables |
+| Dry-run the manual runbook on staging | Privacy team | [docs/ccpa-manual-erasure-runbook.md](../docs/ccpa-manual-erasure-runbook.md) |
