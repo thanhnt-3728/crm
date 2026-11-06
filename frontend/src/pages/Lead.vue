@@ -175,6 +175,12 @@
                 />
 
                 <Button
+                  :tooltip="__('Request data erasure')"
+                  icon="lucide-shield-x"
+                  @click="showDataErasureModal = true"
+                />
+
+                <Button
                   v-if="canDelete"
                   :tooltip="__('Delete')"
                   variant="subtle"
@@ -237,6 +243,13 @@
     :title="doc.lead_name"
     name="Leads"
   />
+  <DataErasureRequestModal
+    v-if="showDataErasureModal"
+    v-model="showDataErasureModal"
+    doctype="CRM Lead"
+    :docname="leadId"
+    :subjectName="doc.lead_name"
+  />
   <LostReasonModal
     v-if="showLostReasonModal"
     v-model="showLostReasonModal"
@@ -263,6 +276,7 @@ import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
+import DataErasureRequestModal from '@/components/Modals/DataErasureRequestModal.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Activities from '@/components/Activities/Activities.vue'
 import AssignTo from '@/components/AssignTo.vue'
@@ -328,6 +342,7 @@ const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
+const showDataErasureModal = ref(false)
 
 const {
   triggerOnChange,
