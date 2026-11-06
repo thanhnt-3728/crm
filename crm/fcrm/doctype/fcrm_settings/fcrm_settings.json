@@ -17,6 +17,8 @@
   "activity_timeline_section",
   "crm_timeline_timestamp_format",
   "crm_timeline_sort_order",
+  "privacy_section",
+  "erasure_holiday_list",
   "currency_tab",
   "currency",
   "exchange_rate_provider_section",
@@ -213,6 +215,18 @@
    "options": "Oldest First\nNewest First"
   },
   {
+   "fieldname": "privacy_section",
+   "fieldtype": "Section Break",
+   "label": "Privacy Requests"
+  },
+  {
+   "description": "Holidays skipped when counting the 10 business days to acknowledge a personal data erasure request. Leave empty to skip weekends only.",
+   "fieldname": "erasure_holiday_list",
+   "fieldtype": "Link",
+   "label": "Erasure Request Holiday List",
+   "options": "CRM Holiday List"
+  },
+  {
    "default": "0",
    "description": "Set once the first admin finishes or skips the setup flow",
    "fieldname": "setup_completed",
@@ -224,7 +238,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-21 10:00:00.000000",
+ "modified": "2026-11-05 14:40:00.000000",
  "modified_by": "Administrator",
  "module": "FCRM",
  "name": "FCRM Settings",

@@ -256,6 +256,11 @@ if int(frappe.__version__.split(".")[0]) < 16:
 doc_events = {
 	"Contact": {
 		"validate": ["crm.api.contact.validate"],
+		"on_trash": ["crm.fcrm.doctype.crm_erasure_request.erasure_guards.block_delete_for_open_request"],
+		"before_rename": [
+			"crm.fcrm.doctype.crm_erasure_request.erasure_guards.block_rename_for_open_request"
+		],
+		"after_rename": ["crm.fcrm.doctype.crm_erasure_request.erasure_guards.follow_rename"],
 	},
 	"Notification Log": {
 		"before_insert": ["crm.extends.notification_log.before_insert"],
@@ -289,10 +294,24 @@ doc_events = {
 		"on_update": [
 			"crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.create_customer_in_erpnext",
 			"crm.automation.events.on_deal_update",
+			"crm.fcrm.doctype.crm_erasure_request.erasure_hold.on_deal_update",
 		],
+		"on_trash": [
+			"crm.fcrm.doctype.crm_erasure_request.erasure_guards.block_delete_for_open_request",
+			"crm.fcrm.doctype.crm_erasure_request.erasure_hold.on_deal_trash",
+		],
+		"before_rename": [
+			"crm.fcrm.doctype.crm_erasure_request.erasure_guards.block_rename_for_open_request"
+		],
+		"after_rename": ["crm.fcrm.doctype.crm_erasure_request.erasure_guards.follow_rename"],
 	},
 	"CRM Lead": {
 		"on_update": ["crm.automation.events.on_lead_update"],
+		"on_trash": ["crm.fcrm.doctype.crm_erasure_request.erasure_guards.block_delete_for_open_request"],
+		"before_rename": [
+			"crm.fcrm.doctype.crm_erasure_request.erasure_guards.block_rename_for_open_request"
+		],
+		"after_rename": ["crm.fcrm.doctype.crm_erasure_request.erasure_guards.follow_rename"],
 	},
 	"Sales Order": {
 		"before_validate": [

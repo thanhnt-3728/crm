@@ -37,7 +37,17 @@ def after_install(force=False):
 	create_assignment_rule_custom_fields()
 	add_assignment_rule_property_setters()
 	seed_default_rules_and_mappings()
+	add_privacy_officer_role()
 	frappe.db.commit()  # persist seeded defaults, also run from restore_defaults  # nosemgrep
+
+
+def add_privacy_officer_role():
+	"""Create the additive role that approves erasure requests (holders also need a CRM role)"""
+	if frappe.db.exists("Role", "Privacy Officer"):
+		return
+	frappe.get_doc({"doctype": "Role", "role_name": "Privacy Officer", "desk_access": 1}).insert(
+		ignore_permissions=True
+	)
 
 
 def add_default_lead_statuses():
