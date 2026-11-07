@@ -17,7 +17,13 @@ from frappe.model.document import Document
 from frappe.query_builder import Criterion
 from frappe.utils import add_months, cint, today
 
-from crm.privacy.identifiers import PHONE_REGION, add_do_not_contact, normalize_email, normalize_identifier, personal_fields
+from crm.privacy.identifiers import (
+	PHONE_REGION,
+	add_do_not_contact,
+	normalize_email,
+	normalize_identifier,
+	personal_fields,
+)
 from crm.privacy.matching import _digits, like_escape
 from crm.privacy.plan import ErasurePlan
 from crm.privacy.rules import erased_person, scrub_version_data
@@ -55,12 +61,7 @@ def _is_hers(plan: ErasurePlan) -> Predicate:
 	addresses count too. Emails and phones compare normalized, and text that quotes one of
 	them counts as hers. Empty values never match.
 	"""
-	words = {
-		value
-		for key, values in plan.her_values.items()
-		if key not in CATEGORY_KEYS
-		for value in values
-	}
+	words = {value for key, values in plan.her_values.items() if key not in CATEGORY_KEYS for value in values}
 	words |= {name.strip().casefold() for names in plan.former_names.values() for name in names if name}
 	categories = {key: plan.her_values.get(key, set()) for key in CATEGORY_KEYS}
 
@@ -73,7 +74,11 @@ def _is_hers(plan: ErasurePlan) -> Predicate:
 			return True
 		if "@" in text and normalize_email(text) in plan.emails:
 			return True
-		if plan.phones and any(ch.isdigit() for ch in text) and normalize_identifier("Phone", text) in plan.phones:
+		if (
+			plan.phones
+			and any(ch.isdigit() for ch in text)
+			and normalize_identifier("Phone", text) in plan.phones
+		):
 			return True
 		# Text quoting her email or phone (a note field, a header) is replaced whole.
 		return _holds_identifier(text, plan)

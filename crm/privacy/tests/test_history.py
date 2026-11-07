@@ -7,8 +7,8 @@ from frappe.utils import add_months, getdate
 
 from crm.api.dashboard import get_dashboard
 from crm.permissions.test_org_hierarchy import make_user
-from crm.privacy.api import log_request, save_request, submit_request
 from crm.privacy import erasure
+from crm.privacy.api import log_request, save_request, submit_request
 from crm.privacy.erasure import run_erasure
 from crm.privacy.history import finish
 from crm.privacy.identifiers import is_blocked
@@ -59,10 +59,16 @@ class TestHistory(IntegrationTestCase):
 
 	def test_version_history_scrubbed_status_kept(self):
 		lead = frappe.get_doc("CRM Lead", self.m.lead)
-		lead.update({"email": "marisol.v@sierrafoothills.example", "status": "Contacted"}).save(ignore_version=False)
-		save_request(self.name, {"identifiers": [{"kind": "Email", "value": "marisol.v@sierrafoothills.example"}]})
+		lead.update({"email": "marisol.v@sierrafoothills.example", "status": "Contacted"}).save(
+			ignore_version=False
+		)
+		save_request(
+			self.name, {"identifiers": [{"kind": "Email", "value": "marisol.v@sierrafoothills.example"}]}
+		)
 		run_erasure(self.name, self.officer)
-		data = "".join(frappe.get_all("Version", {"ref_doctype": "CRM Lead", "docname": self.m.lead}, pluck="data"))
+		data = "".join(
+			frappe.get_all("Version", {"ref_doctype": "CRM Lead", "docname": self.m.lead}, pluck="data")
+		)
 		self.assertNotIn("sierrafoothills", data.lower())
 		self.assertIn("Contacted", data)
 
@@ -104,7 +110,9 @@ class TestHistory(IntegrationTestCase):
 			("CRM Notification", ["notification_text", "message"]),
 		]:
 			for f in fields:
-				self.assertFalse(frappe.db.exists(dt, {f: ["like", "%sierrafoothills.example%"]}), f"{dt}.{f}")
+				self.assertFalse(
+					frappe.db.exists(dt, {f: ["like", "%sierrafoothills.example%"]}), f"{dt}.{f}"
+				)
 				self.assertFalse(frappe.db.exists(dt, {f: ["like", "%Marisol%"]}), f"{dt}.{f}")
 
 	# Beyond the brief: deal and contact history, the controller's R17, edge cases.
@@ -127,7 +135,12 @@ class TestHistory(IntegrationTestCase):
 		self.assertNotIn("office manager", json.dumps(versions).lower())
 
 	def test_deal_history_text_quoting_her_email_replaced_row_kept(self):
-		data = {"changed": [["lost_notes", None, "Sent to marisol@sierrafoothills.example"], ["status", "New", "Won"]]}
+		data = {
+			"changed": [
+				["lost_notes", None, "Sent to marisol@sierrafoothills.example"],
+				["status", "New", "Won"],
+			]
+		}
 		version = self._raw_version("CRM Deal", self.m.won_deal, data)
 		run_erasure(self.name, self.officer)
 		stored = json.loads(frappe.db.get_value("Version", version, "data"))
@@ -137,7 +150,12 @@ class TestHistory(IntegrationTestCase):
 		# Contact does not track changes by default; a site may switch it on.
 		data = {
 			"changed": [["designation", None, "Dentist"], ["status", "Passive", "Open"]],
-			"added": [["links", {"link_doctype": "CRM Lead", "link_name": self.m.lead, "link_title": "Marisol Vega"}]],
+			"added": [
+				[
+					"links",
+					{"link_doctype": "CRM Lead", "link_name": self.m.lead, "link_title": "Marisol Vega"},
+				]
+			],
 		}
 		self._raw_version("Contact", self.m.contact, data)
 		run_erasure(self.name, self.officer)
@@ -167,7 +185,9 @@ class TestHistory(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 		rows = [
-			self._raw_version("Comment", comment.name, {"changed": [["content", "Spoke", "Spoke to Marisol"]]}),
+			self._raw_version(
+				"Comment", comment.name, {"changed": [["content", "Spoke", "Spoke to Marisol"]]}
+			),
 			self._raw_version("CRM Task", task.name, {"changed": [["title", "Call", "Call Marisol"]]}),
 		]
 		run_erasure(self.name, self.officer)
@@ -193,7 +213,9 @@ class TestHistory(IntegrationTestCase):
 
 	def test_note_history_deleted(self):
 		note = make_note(("CRM Lead", self.m.lead), title="Call", content="Marisol prefers mornings")
-		frappe.get_doc("FCRM Note", note).update({"content": "Marisol prefers evenings"}).save(ignore_version=False)
+		frappe.get_doc("FCRM Note", note).update({"content": "Marisol prefers evenings"}).save(
+			ignore_version=False
+		)
 		self.assertTrue(frappe.db.exists("Version", {"ref_doctype": "FCRM Note", "docname": note}))
 		run_erasure(self.name, self.officer)
 		self.assertFalse(frappe.db.exists("Version", {"ref_doctype": "FCRM Note", "docname": note}))
@@ -209,13 +231,20 @@ class TestHistory(IntegrationTestCase):
 	def test_deleted_copy_of_a_planned_note_is_purged_by_name(self):
 		note = make_note(("CRM Lead", self.m.lead))
 		copy = frappe.get_doc(
-			{"doctype": "Deleted Document", "deleted_doctype": "FCRM Note", "deleted_name": note, "data": "{}"}
+			{
+				"doctype": "Deleted Document",
+				"deleted_doctype": "FCRM Note",
+				"deleted_name": note,
+				"data": "{}",
+			}
 		).insert(ignore_permissions=True)
 		run_erasure(self.name, self.officer)
 		self.assertFalse(frappe.db.exists("Deleted Document", copy.name))
 
 	def test_deleted_lead_mentioning_her_phone_is_purged(self):
-		other = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Dup", "mobile_no": "530.555.0142"}).insert()
+		other = frappe.get_doc(
+			{"doctype": "CRM Lead", "first_name": "Dup", "mobile_no": "530.555.0142"}
+		).insert()
 		frappe.delete_doc("CRM Lead", other.name)
 		run_erasure(self.name, self.officer)
 		self.assertFalse(frappe.db.exists("Deleted Document", {"deleted_name": other.name}))

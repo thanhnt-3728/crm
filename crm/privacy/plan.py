@@ -140,10 +140,10 @@ def _her_values(leads: list[str], contacts: list[str]) -> dict[str, set[str]]:
 	for doctype, names, fields in ((LEAD, leads, LEAD_VALUE_FIELDS), (CONTACT, contacts, CONTACT_VALUE_FIELDS)):
 		for name in names:
 			row = frappe.db.get_value(doctype, name, list(fields), as_dict=True) or {}
-			for field in fields:
-				value = row.get(field)
+			for fieldname in fields:
+				value = row.get(fieldname)
 				if isinstance(value, str) and value.strip():
-					values.setdefault(field, set()).add(value.strip().casefold())
+					values.setdefault(fieldname, set()).add(value.strip().casefold())
 	return values
 
 
