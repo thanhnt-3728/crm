@@ -21,6 +21,7 @@ from crm.privacy.matching import (
 	refresh_matches,
 )
 from crm.privacy.permissions import FULL_ACCESS_ROLES, access_level, is_compliance
+from crm.privacy.plan import plan_erasure, preview
 
 DOCTYPE = "CRM Erasure Request"
 SOURCE_DOCTYPES = ("CRM Lead", "Contact", "CRM Deal")
@@ -124,6 +125,14 @@ def log_request(source_doctype: str | None = None, source_name: str | None = Non
 		refresh_matches(doc)
 	doc.insert()
 	return doc.name
+
+
+@frappe.whitelist()
+def get_erasure_preview(name: str) -> dict:
+	"""What approving the request would remove and keep. Compliance only."""
+	if not is_compliance():
+		frappe.throw(_("Only Compliance can preview an erasure"), frappe.PermissionError)
+	return preview(plan_erasure(frappe.get_doc(DOCTYPE, name)))
 
 
 @frappe.whitelist()

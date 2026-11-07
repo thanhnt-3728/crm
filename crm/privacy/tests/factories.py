@@ -63,3 +63,60 @@ def make_marisol(owner: str | None = None) -> frappe._dict:
 def make_request(**fields) -> "frappe.model.document.Document":
 	"""Insert a CRM Erasure Request as the current user."""
 	return frappe.get_doc({"doctype": "CRM Erasure Request", **fields}).insert()
+
+
+def make_communication(
+	sender: str,
+	reference: tuple[str, str] | None = None,
+	recipients: str = "",
+	subject: str = "Hello",
+	content: str = "Hi",
+	**fields,
+) -> str:
+	"""Insert an email Communication. `reference` is a `(doctype, name)` tuple. Returns its name."""
+	values = {
+		"doctype": "Communication",
+		"sent_or_received": "Sent",
+		"communication_medium": "Email",
+		"communication_type": "Communication",
+		"sender": sender,
+		"recipients": recipients,
+		"subject": subject,
+		"content": content,
+	}
+	if reference:
+		values["reference_doctype"], values["reference_name"] = reference
+	values.update(fields)
+	return frappe.get_doc(values).insert(ignore_permissions=True).name
+
+
+def make_note(reference: tuple[str, str], title: str = "Note", content: str = "Note text") -> str:
+	"""Insert an FCRM Note on a `(doctype, name)` record. Returns its name."""
+	doctype, name = reference
+	return (
+		frappe.get_doc(
+			{
+				"doctype": "FCRM Note",
+				"title": title,
+				"content": content,
+				"reference_doctype": doctype,
+				"reference_docname": name,
+			}
+		)
+		.insert(ignore_permissions=True)
+		.name
+	)
+
+
+def make_call_log(**fields) -> str:
+	"""Insert a CRM Call Log. Pass `from` through a dict: `make_call_log(**{"from": "..."})`."""
+	values = {
+		"doctype": "CRM Call Log",
+		"id": frappe.generate_hash(length=12),
+		"type": "Incoming",
+		"status": "Completed",
+		"from": "+15550009998",
+		"to": "+15550009999",
+	}
+	values.update(fields)
+	return frappe.get_doc(values).insert(ignore_permissions=True).name

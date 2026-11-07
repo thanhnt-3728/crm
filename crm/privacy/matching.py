@@ -38,7 +38,7 @@ def _digits(column):
 	return Replace(_digits_only(column), ".", "")
 
 
-def _phone_rows(doctype: str, columns: list[str], phone: str) -> list[dict]:
+def phone_rows(doctype: str, columns: list[str], phone: str) -> list[dict]:
 	"""Rows of `doctype` whose `columns` hold `phone`, in any formatting."""
 	digits = phone_search_digits(phone, PHONE_REGION)
 	if not digits:
@@ -88,9 +88,9 @@ def _records_for_identifier(kind: str, value: str) -> dict[tuple[str, str], str]
 
 	reason = PHONE_REASON
 	for doctype in (LEAD, DEAL):
-		for row in _phone_rows(doctype, ["mobile_no", "phone"], value):
+		for row in phone_rows(doctype, ["mobile_no", "phone"], value):
 			found.setdefault((doctype, row.name), reason)
-	for row in _phone_rows(CONTACT, ["mobile_no"], value):
+	for row in phone_rows(CONTACT, ["mobile_no"], value):
 		found.setdefault((CONTACT, row.name), reason)
 	child = frappe.qb.DocType("Contact Phone")
 	digits = phone_search_digits(value, PHONE_REGION)
@@ -108,7 +108,7 @@ def _records_for_identifier(kind: str, value: str) -> dict[tuple[str, str], str]
 	return found
 
 
-def _identifier_values(request) -> list[tuple[str, str]]:
+def identifier_values(request) -> list[tuple[str, str]]:
 	seen: list[tuple[str, str]] = []
 	for row in request.identifiers:
 		if row.excluded:
@@ -119,7 +119,7 @@ def _identifier_values(request) -> list[tuple[str, str]]:
 	return seen
 
 
-def _confirmed(request, doctype: str) -> list[str]:
+def confirmed_names(request, doctype: str) -> list[str]:
 	return [m.reference_name for m in request.matches if m.confirmed and m.reference_doctype == doctype]
 
 
@@ -146,9 +146,9 @@ def sync_identifiers(request) -> None:
 	"""
 	have = {(row.kind, normalize_identifier(row.kind, row.value)) for row in request.identifiers}
 	candidates = []
-	for lead in _confirmed(request, LEAD):
+	for lead in confirmed_names(request, LEAD):
 		candidates += lead_identifiers(lead)
-	for contact in _confirmed(request, CONTACT):
+	for contact in confirmed_names(request, CONTACT):
 		candidates += contact_identifiers(contact)
 	for kind, raw in candidates:
 		value = normalize_identifier(kind, raw)
@@ -161,12 +161,12 @@ def sync_identifiers(request) -> None:
 def find_matches(request) -> list[dict]:
 	"""Records that match the request's non-excluded identifiers, plus their linked deals."""
 	found: dict[tuple[str, str], str] = {}
-	for kind, value in _identifier_values(request):
+	for kind, value in identifier_values(request):
 		for key, reason in _records_for_identifier(kind, value).items():
 			found.setdefault(key, reason)
 
-	leads = _confirmed(request, LEAD)
-	contacts = _confirmed(request, CONTACT)
+	leads = confirmed_names(request, LEAD)
+	contacts = confirmed_names(request, CONTACT)
 	if leads:
 		for name in frappe.get_all(DEAL, filters={"lead": ["in", leads]}, pluck="name"):
 			found.setdefault((DEAL, name), CONVERTED_REASON)
@@ -214,7 +214,7 @@ def refresh_matches(request) -> None:
 		row.idx = idx
 
 
-def _addresses(*texts: str | None) -> set[str]:
+def addresses_in_text(*texts: str | None) -> set[str]:
 	found = set()
 	for text in texts:
 		for match in _EMAIL_IN_TEXT.findall(text or ""):
@@ -231,7 +231,7 @@ def _count_emails(value: str) -> int:
 		.where(Criterion.any([getattr(table, c).like(f"%{like_escape(value)}%") for c in columns]))
 		.run(as_dict=True)
 	)
-	return sum(1 for row in rows if value in _addresses(*[row.get(c) for c in columns]))
+	return sum(1 for row in rows if value in addresses_in_text(*[row.get(c) for c in columns]))
 
 
 def identifier_usage(request) -> list[dict]:
@@ -245,7 +245,7 @@ def identifier_usage(request) -> list[dict]:
 			if row.kind == "Email":
 				emails = _count_emails(value)
 			else:
-				calls = len(_phone_rows("CRM Call Log", ["from", "to"], value))
+				calls = len(phone_rows("CRM Call Log", ["from", "to"], value))
 		usage.append(
 			{
 				"kind": row.kind,
