@@ -63,7 +63,7 @@ def identifier_fields(doctype: str) -> dict:
 # pointing at a different record, counts as adding its values.
 TABLE_LINKS = {("CRM Deal", "contacts"): "contact"}
 # Doctypes whose own identifier fields are copied from their primary row (CRMDeal.set_primary_email_mobile_no).
-DERIVED_FROM_ROWS = {"CRM Deal"}
+DERIVED_FROM_ROWS = {"CRM Deal": ("email", "mobile_no", "phone")}
 
 
 def _stored_rows(doc, table: str, fields: list[str]) -> list:
@@ -113,13 +113,14 @@ def new_identifier_values(doc) -> list[tuple[str, str]]:
 		row_values.extend(_new_row_values(doc, table, columns))
 
 	# A deal's own email and phones are re-copied from its primary contact row on every
-	# save, so they can only be new when that row is.
-	copied_from_rows = doc.doctype in DERIVED_FROM_ROWS and not is_new and not row_values
-	if not copied_from_rows:
-		for fieldname, kind in spec["fields"].items():
-			value = doc.get(fieldname)
-			if value and (is_new or doc.has_value_changed(fieldname)):
-				values.append((kind, value))
+	# save, so they can only be new when that row is. Custom fields are never copied.
+	derived = DERIVED_FROM_ROWS.get(doc.doctype, ()) if not is_new and not row_values else ()
+	for fieldname, kind in spec["fields"].items():
+		if fieldname in derived:
+			continue
+		value = doc.get(fieldname)
+		if value and (is_new or doc.has_value_changed(fieldname)):
+			values.append((kind, value))
 
 	return values + row_values
 

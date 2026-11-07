@@ -153,6 +153,30 @@ class TestBlocking(IntegrationTestCase):
 			with self.assertRaises(ErasedPersonError):
 				lead.insert()
 
+	def test_custom_personal_phone_field_on_existing_deal_is_checked(self):
+		# `next_step` is a real Data column standing in for a custom personal phone field
+		meta = frappe.get_meta("CRM Deal")
+		original = meta.get_field
+
+		def get_field(name, *args, **kwargs):
+			if name == "next_step":
+				return frappe._dict(fieldname=name, fieldtype="Data", options="Phone")
+			return original(name, *args, **kwargs)
+
+		keep = create_test_contact(first_name="Keep", phone="530-555-0100")
+		deal = create_test_deal(contacts=[{"contact": keep.name}], next_step="530-555-0111")
+		with (
+			patch("crm.privacy.blocking.personal_fields", return_value={"CRM Deal": {"next_step"}}),
+			patch.object(meta, "get_field", get_field),
+		):
+			deal.reload()
+			deal.deal_value = 7
+			deal.save()  # field unchanged
+
+			deal.next_step = "(530) 555-0142"
+			with self.assertRaises(ErasedPersonError):
+				deal.save()
+
 	def test_custom_personal_email_field_is_an_email_identifier(self):
 		meta = frappe.get_meta("CRM Lead")
 		original = meta.get_field
