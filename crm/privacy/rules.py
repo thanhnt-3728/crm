@@ -17,6 +17,57 @@ _EMAIL_START = r"(?<![\w.+%-])"
 _EMAIL_END = r"(?![\w-])(?!\.\w)"
 
 
+# Seeded into CRM Privacy Settings (only while its table is empty).
+DEFAULT_PERSONAL_FIELDS: dict[str, list[str]] = {
+	"CRM Lead": [
+		"salutation",
+		"first_name",
+		"middle_name",
+		"last_name",
+		"lead_name",
+		"email",
+		"mobile_no",
+		"phone",
+		"job_title",
+		"image",
+		"gender",
+		"linkedin",
+		"twitter",
+		"facebook",
+	],
+	"CRM Deal": [
+		"salutation",
+		"first_name",
+		"last_name",
+		"lead_name",
+		"email",
+		"mobile_no",
+		"phone",
+		"job_title",
+		"gender",
+		"linkedin",
+		"twitter",
+		"facebook",
+	],
+	"Contact": [
+		"salutation",
+		"first_name",
+		"middle_name",
+		"last_name",
+		"full_name",
+		"email_id",
+		"mobile_no",
+		"phone",
+		"designation",
+		"image",
+		"gender",
+	],
+	"Contact Email": ["email_id"],
+	"Contact Phone": ["phone"],
+	"CRM Contacts": ["full_name", "email", "mobile_no", "phone", "gender"],
+}
+
+
 def erased_person(request: str) -> str:
 	return f"Erased person {request}"
 

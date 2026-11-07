@@ -9,6 +9,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from crm.domain_enrichment.install import seed_default_rules_and_mappings
 from crm.fcrm.doctype.crm_dashboard.crm_dashboard import create_default_manager_dashboard
 from crm.fcrm.doctype.crm_products.crm_products import create_product_details_script
+from crm.privacy import install as privacy_install
 
 
 def before_install():
@@ -37,6 +38,7 @@ def after_install(force=False):
 	create_assignment_rule_custom_fields()
 	add_assignment_rule_property_setters()
 	seed_default_rules_and_mappings()
+	privacy_install.after_migrate()
 	frappe.db.commit()  # persist seeded defaults, also run from restore_defaults  # nosemgrep
 
 

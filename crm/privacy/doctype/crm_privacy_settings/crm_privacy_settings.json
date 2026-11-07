@@ -1,0 +1,82 @@
+{
+ "actions": [],
+ "creation": "2026-11-07 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "head_of_compliance",
+  "contract_retention_months",
+  "identifier_secret",
+  "section_personal_fields",
+  "personal_fields"
+ ],
+ "fields": [
+  {
+   "description": "Receives the day-40 reminder for every open privacy request.",
+   "fieldname": "head_of_compliance",
+   "fieldtype": "Link",
+   "label": "Head of Compliance",
+   "options": "User"
+  },
+  {
+   "default": "84",
+   "description": "How long a retained-contract record is kept after the erasure date.",
+   "fieldname": "contract_retention_months",
+   "fieldtype": "Int",
+   "label": "Contract Retention (Months)"
+  },
+  {
+   "fieldname": "identifier_secret",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Identifier Secret",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_personal_fields",
+   "fieldtype": "Section Break",
+   "label": "Personal Fields"
+  },
+  {
+   "description": "Fields an erasure request scrubs. Seeded with defaults on migrate while empty; removals are kept.",
+   "fieldname": "personal_fields",
+   "fieldtype": "Table",
+   "label": "Personal Fields",
+   "options": "CRM Personal Field"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Privacy",
+ "name": "CRM Privacy Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Compliance",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
