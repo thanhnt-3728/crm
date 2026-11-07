@@ -280,7 +280,8 @@ function contextualCommands(tracked) {
 }
 
 function navigationCommands(tracked) {
-  return getNavigationItems().map((item) =>
+  const role = usersStore().getUserRole()
+  return getNavigationItems({ role }).map((item) =>
     tracked(
       {
         id: `navigate-${item.route}`,

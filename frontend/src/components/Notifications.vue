@@ -44,6 +44,10 @@
                 :class="[n.read ? 'bg-transparent' : 'bg-surface-gray-10']"
               />
               <WhatsAppIcon v-if="n.type == 'WhatsApp'" class="size-7" />
+              <LucideShieldCheck
+                v-else-if="n.type == 'Compliance'"
+                class="size-7 text-ink-gray-7"
+              />
               <UserAvatar v-else :user="n.from_user.name" size="lg" />
             </div>
             <div>
@@ -85,6 +89,8 @@ import MarkAsDoneIcon from '@/components/Icons/MarkAsDoneIcon.vue'
 import NotificationsIcon from '@/components/Icons/NotificationsIcon.vue'
 import EmptyState from '@/components/ListViews/EmptyState.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import LucideShieldCheck from '~icons/lucide/shield-check'
+import { complianceNotificationRoute } from '@/utils/erasureRequestDisplay'
 import {
   visible,
   notifications,
@@ -130,6 +136,10 @@ onMounted(() => {
 })
 
 function getRoute(notification) {
+  // Compliance notices have no sender and point at a request, an inbound email or a deal
+  const compliance = complianceNotificationRoute(notification)
+  if (compliance) return compliance
+
   let params = {
     leadId: notification.reference_name,
   }

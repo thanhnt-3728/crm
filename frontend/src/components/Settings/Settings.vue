@@ -80,6 +80,7 @@ import FormsSettings from '@/components/Settings/Forms/FormsSettings.vue'
 import GeneralSettings from '@/components/Settings/GeneralSettings.vue'
 import EnrichmentSettings from '@/components/Settings/Enrichment/EnrichmentSettings.vue'
 import DashboardSettings from '@/components/Settings/DashboardSettings.vue'
+import PrivacySettings from '@/components/Settings/PrivacySettings.vue'
 import WorkflowAutomationPage from '@/components/Settings/WorkflowAutomations/WorkflowAutomationPage.vue'
 import EmailTemplatePage from '@/components/Settings/EmailTemplate/EmailTemplatePage.vue'
 import TelephonyPage from '@/components/Settings/Telephony/TelephonyPage.vue'
@@ -99,7 +100,7 @@ import ShieldCheck from '~icons/lucide/shield-check'
 import LucideZap from '~icons/lucide/zap'
 import SlaConfig from './Sla/SlaConfig.vue'
 
-const { isManager, getUser } = usersStore()
+const { isManager, isAdmin, getUser } = usersStore()
 
 const user = computed(() => getUser() || {})
 
@@ -147,6 +148,12 @@ const tabs = computed(() => {
           label: __('Brand'),
           icon: SparkleIcon,
           component: markRaw(BrandSettings),
+        },
+        {
+          label: __('Privacy'),
+          icon: markRaw(h(ShieldCheck)),
+          component: markRaw(PrivacySettings),
+          condition: () => isAdmin(), // System Manager only, as the server enforces
         },
       ],
       condition: () => isManager(),
