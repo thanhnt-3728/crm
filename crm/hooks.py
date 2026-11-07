@@ -269,9 +269,13 @@ doc_events = {
 		"on_update": ["crm.api.todo.on_update"],
 	},
 	"Communication": {
+		"before_insert": ["crm.privacy.inbound.route_inbound_email"],
+		# after Communication.validate re-adds timeline links
+		"validate": ["crm.privacy.inbound.keep_off_timelines"],
 		"after_insert": [
 			"crm.utils.on_communication_insert",
 			"crm.automation.events.on_communication",
+			"crm.privacy.inbound.notify_blocked_inbound",
 		],
 		"on_update": ["crm.utils.on_communication_update"],
 		"on_change": ["crm.api.email.stamp_send_time"],
@@ -297,6 +301,7 @@ doc_events = {
 		],
 	},
 	"CRM Lead": {
+		"before_insert": ["crm.privacy.inbound.guard_inbound_lead"],
 		"validate": ["crm.privacy.blocking.check_doc"],
 		"on_update": ["crm.automation.events.on_lead_update"],
 	},

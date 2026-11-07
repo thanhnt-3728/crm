@@ -84,6 +84,14 @@ def is_blocked(kind: Literal["Email", "Phone"], value: str | None) -> bool:
 	return bool(frappe.db.exists("CRM Do Not Contact", {"identifier_hash": identifier_hash}))
 
 
+def blocking_request(kind: Literal["Email", "Phone"], value: str | None) -> str | None:
+	"""The request recorded on the do-not-contact entry that blocks this value, if any."""
+	identifier_hash = _identifier_hash(kind, value)
+	if not identifier_hash:
+		return None
+	return frappe.db.get_value("CRM Do Not Contact", {"identifier_hash": identifier_hash}, "request")
+
+
 def add_do_not_contact(kind: Literal["Email", "Phone"], value: str | None, request: str) -> None:
 	"""Record the identifier's hash (never the identifier) as do-not-contact. Idempotent."""
 	identifier_hash = _identifier_hash(kind, value)
@@ -108,7 +116,11 @@ def compliance_users() -> list[str]:
 	"""Enabled users holding the Compliance role (Administrator and Guest excluded)."""
 	holders = frappe.get_all(
 		"Has Role",
-		filters={"role": "Compliance", "parenttype": "User", "parent": ["not in", ["Administrator", "Guest"]]},
+		filters={
+			"role": "Compliance",
+			"parenttype": "User",
+			"parent": ["not in", ["Administrator", "Guest"]],
+		},
 		pluck="parent",
 		ignore_permissions=True,
 	)

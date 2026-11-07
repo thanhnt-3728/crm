@@ -37,7 +37,9 @@ def make_marisol(owner: str | None = None) -> frappe._dict:
 		lead_fields["lead_owner"] = owner
 	lead = frappe.get_doc(lead_fields).insert()
 
-	contact = create_test_contact(first_name="Marisol", last_name="Vega", email=MARISOL_EMAIL, mobile_no=MARISOL_MOBILE)
+	contact = create_test_contact(
+		first_name="Marisol", last_name="Vega", email=MARISOL_EMAIL, mobile_no=MARISOL_MOBILE
+	)
 
 	def deal(status: str, value: int) -> str:
 		fields = {
@@ -88,6 +90,27 @@ def make_communication(
 		values["reference_doctype"], values["reference_name"] = reference
 	values.update(fields)
 	return frappe.get_doc(values).insert(ignore_permissions=True).name
+
+
+def make_email_account(**fields) -> str:
+	"""Insert a non-enabled incoming Email Account (`inbox@northpine.example`). Returns its name.
+
+	`create_lead_from_incoming_email` and `create_contact` default to off.
+	"""
+	values = {
+		"doctype": "Email Account",
+		"email_account_name": "North Pine Inbox",
+		"email_id": "inbox@northpine.example",
+		"enable_incoming": 0,
+		"enable_outgoing": 0,
+		"create_lead_from_incoming_email": 0,
+		"create_contact": 0,
+	}
+	values.update(fields)
+	account = frappe.get_doc(values)
+	account.flags.ignore_mandatory = True
+	account.flags.ignore_validate = True
+	return account.insert(ignore_permissions=True).name
 
 
 def make_note(reference: tuple[str, str], title: str = "Note", content: str = "Note text") -> str:

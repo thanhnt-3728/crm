@@ -269,6 +269,11 @@ def create_lead_from_incoming_email(doc: Communication, method: str | None = Non
 	if _is_automated_email_sender(doc.sender):
 		return
 
+	from crm.privacy.inbound import is_erasure_address
+
+	if is_erasure_address(doc.sender):
+		return
+
 	lead = frappe.new_doc("CRM Lead")
 	lead.email = doc.sender
 
