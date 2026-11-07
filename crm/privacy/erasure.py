@@ -30,6 +30,7 @@ from crm.privacy.identifiers import normalize_identifier, personal_fields
 from crm.privacy.matching import like_escape, phone_rows
 from crm.privacy.plan import ErasurePlan, plan_erasure
 from crm.privacy.rules import DEAL_FIELD_SOURCES, deal_fields_to_blank, erased_person, scrub_identifiers
+from crm.privacy.sweep import sweep_activities
 
 DOCTYPE = "CRM Erasure Request"
 LEAD = "CRM Lead"
@@ -396,4 +397,4 @@ def erase_records(plan: ErasurePlan, doc: Document, after_commit: list[Callable]
 	_erase_link_titles(plan, placeholder)
 
 
-STEPS: list[Callable[[ErasurePlan, Document, list[Callable]], None]] = [erase_records]
+STEPS: list[Callable[[ErasurePlan, Document, list[Callable]], None]] = [erase_records, sweep_activities]
