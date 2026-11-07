@@ -16,6 +16,7 @@ or phone; the request number identifies her.
 
 import re
 from collections.abc import Callable
+from contextlib import suppress
 from functools import partial
 
 import frappe
@@ -58,6 +59,9 @@ ADDRESS_BLANK_TYPES = (
 NUMBER_TYPES = ("Int", "Float", "Currency", "Percent", "Check", "Rating", "Duration")
 DATE_TYPES = ("Date", "Datetime", "Time")
 NAME_VALUE_KEYS = ("first_name", "middle_name", "last_name", "full_name", "lead_name")
+FALLBACK_ERROR = "The erasure failed and its error could not be stored without personal data."
+# Child tables whose link_title copies the linked record's title (her name).
+LINK_TITLE_TABLES = ("Dynamic Link", "Communication Link")
 
 
 def run_erasure(request: str, approver: str) -> None:
@@ -71,6 +75,7 @@ def run_erasure(request: str, approver: str) -> None:
 	pending = capture_pending_side_effects()
 	after_commit: list[Callable] = []  # registered only on success
 	plan = None
+	error = None
 	try:
 		plan = plan_erasure(doc)
 		for step in STEPS:
@@ -88,20 +93,48 @@ def run_erasure(request: str, approver: str) -> None:
 			},
 		)
 	except Exception:
-		frappe.db.rollback(save_point="erasure")
-		discard_side_effects_since(pending)
-		# Caches filled during the attempt may hold rolled-back values (rename_doc also clears all).
-		frappe.clear_cache()
 		try:
 			error = _error_text(doc, plan)
 		except Exception:
-			error = "The erasure failed and its error could not be stored without personal data."
-		frappe.db.set_value(DOCTYPE, request, {"erasure_status": "Failed", "erasure_error": error})
-		_commit()
+			error = FALLBACK_ERROR
+	if error is not None:
+		# Handled outside the except block: nothing below (log_error, the logger, Sentry, the
+		# job runner) can pick up the original exception, whose text may hold personal data.
+		_record_failure(request, error, pending)
 		return
 	for fn in after_commit:
 		frappe.db.after_commit.add(fn)
 	_commit()
+
+
+class ErasureFailed(Exception):
+	"""Raised, without the original exception attached, when even recording a failure fails."""
+
+
+def _record_failure(request: str, error: str, pending: dict) -> None:
+	"""Undo the attempt and mark the request Failed with the scrubbed `error`."""
+	try:
+		frappe.db.rollback(save_point="erasure")
+	except Exception:
+		# After a deadlock or a lost connection the server has already rolled back the whole
+		# transaction and the savepoint is gone. Nothing before the savepoint needs keeping.
+		with suppress(Exception):
+			frappe.db.rollback()
+	with suppress(Exception):
+		discard_side_effects_since(pending)
+	with suppress(Exception):
+		# Caches filled during the attempt may hold rolled-back values (rename_doc also clears all).
+		frappe.clear_cache()
+
+	try:
+		frappe.db.set_value(DOCTYPE, request, {"erasure_status": "Failed", "erasure_error": error})
+		frappe.log_error(
+			title=f"Erasure failed for {request}", message=error, reference_doctype=DOCTYPE, reference_name=request
+		)
+		_commit()
+	except Exception:
+		# `from None` keeps the original traceback, which may hold personal data, out of the job log.
+		raise ErasureFailed(f"Erasure failed for {request} and the failure could not be recorded") from None
 
 
 def _commit() -> None:
@@ -176,13 +209,21 @@ def _erase_leads(plan: ErasurePlan, listed: dict[str, set[str]], placeholder: st
 		_erase_fields(LEAD, lead, fields, LEAD_NAME_FIELDS, placeholder)
 
 
-def _erase_deals_on(plan: ErasurePlan) -> None:
-	"""On deals she is still on, blank the deal fields that hold her values."""
-	fields = _value_fields(DEAL, [*DEAL_IDENTIFIER_FIELDS, *DEAL_FIELD_SOURCES])
-	by_name = {df.fieldname: df for df in fields}
+def _erase_deals_on(plan: ErasurePlan, listed: dict[str, set[str]]) -> None:
+	"""On deals she is still on, blank the deal fields that hold her values.
+
+	Name, title, social and identifier fields are blanked only where they hold her values
+	(another person's may be there). Any other field listed for CRM Deal in the settings
+	is blanked whenever it is set.
+	"""
+	compared = {*DEAL_IDENTIFIER_FIELDS, *DEAL_FIELD_SOURCES}
+	fields = _value_fields(DEAL, sorted(compared))
+	extra = _value_fields(DEAL, sorted(listed.get(DEAL, set()) - compared))
+	by_name = {df.fieldname: df for df in [*fields, *extra]}
 	for deal in plan.deals_on:
 		row = frappe.db.get_value(DEAL, deal, list(by_name), as_dict=True) or {}
 		blank = deal_fields_to_blank(row, plan.her_values, plan.emails, plan.phones)
+		blank += [df.fieldname for df in extra if row.get(df.fieldname)]
 		values = {fieldname: _blank(by_name[fieldname]) for fieldname in blank if fieldname in by_name}
 		if values:
 			frappe.db.set_value(DEAL, deal, values, update_modified=False)
@@ -238,11 +279,35 @@ def _erase_contacts(plan: ErasurePlan, listed: dict[str, set[str]], placeholder:
 			frappe.db.delete(child, {"parenttype": CONTACT, "parent": contact})
 
 
-def _erase_addresses(plan: ErasurePlan) -> None:
+def _erase_addresses(plan: ErasurePlan, placeholder: str) -> None:
 	meta = frappe.get_meta(ADDRESS)
-	fields = [df for df in meta.fields if df.fieldtype in ADDRESS_BLANK_TYPES and df.fieldname not in ADDRESS_KEEP]
+	named = ("address_title",)  # the title (and name source) gets the placeholder
+	fields = [
+		df
+		for df in meta.fields
+		if df.fieldtype in ADDRESS_BLANK_TYPES and df.fieldname not in ADDRESS_KEEP and df.fieldname not in named
+	]
 	for address in plan.addresses:
-		_erase_fields(ADDRESS, address, fields, (), "")
+		_erase_fields(ADDRESS, address, fields, named, placeholder)
+
+
+def _erase_link_titles(plan: ErasurePlan, placeholder: str) -> None:
+	"""Put the placeholder in `link_title` of link rows pointing at her records.
+
+	Address and Communication copy the linked record's title (her name) into these rows;
+	rename_doc moves `link_name` but leaves `link_title`.
+	"""
+	targets = {LEAD: plan.leads, CONTACT: plan.contacts, ADDRESS: plan.addresses}
+	for child in LINK_TITLE_TABLES:
+		table = frappe.qb.DocType(child)
+		for doctype, names in targets.items():
+			if names:
+				(
+					frappe.qb.update(table)
+					.set(table.link_title, placeholder)
+					.where((table.link_doctype == doctype) & table.link_name.isin(names))
+					.run()
+				)
 
 
 def _rename_all(doctype: str, names: list[str], base: str, after_commit: list[Callable]) -> list[str]:
@@ -320,14 +385,15 @@ def erase_records(plan: ErasurePlan, doc: Document, after_commit: list[Callable]
 	listed = personal_fields()
 
 	_erase_leads(plan, listed, placeholder)
-	_erase_deals_on(plan)
+	_erase_deals_on(plan, listed)
 	_erase_deal_contact_rows(plan, listed, placeholder)
 	_erase_deal_identifiers(plan)
 	_erase_contacts(plan, listed, placeholder)
-	_erase_addresses(plan)
+	_erase_addresses(plan, placeholder)
 
 	plan.contacts[:] = _rename_all(CONTACT, plan.contacts, placeholder, after_commit)
 	plan.addresses[:] = _rename_all(ADDRESS, plan.addresses, placeholder, after_commit)
+	_erase_link_titles(plan, placeholder)
 
 
 STEPS: list[Callable[[ErasurePlan, Document, list[Callable]], None]] = [erase_records]

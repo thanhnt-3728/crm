@@ -9,11 +9,15 @@ from crm.permissions.test_org_hierarchy import make_user
 from crm.privacy import erasure
 from crm.privacy.api import approve_request, log_request, save_request, submit_request
 from crm.privacy.erasure import run_erasure
-from crm.privacy.tests.factories import MARISOL_EMAIL, make_compliance_user, make_marisol
+from crm.privacy.tests.factories import MARISOL_EMAIL, make_communication, make_compliance_user, make_marisol
 
 
 class TestErasureRecords(IntegrationTestCase):
 	def setUp(self):
+		# Error Log lives in the SQLite log database, outside the test transaction.
+		log_error = patch("frappe.log_error")
+		log_error.start()
+		self.addCleanup(log_error.stop)
 		if not frappe.db.exists("CRM Lost Reason", "Other"):
 			frappe.get_doc({"doctype": "CRM Lost Reason", "lost_reason": "Other"}).insert()
 		make_user("rep@example.com", ["Sales User"])
@@ -94,9 +98,19 @@ class TestErasureRecords(IntegrationTestCase):
 
 	def test_approve_queues_the_job(self):
 		frappe.set_user(self.officer)
-		out = approve_request(self.name, f"  {self.name} ")
+		with patch("frappe.enqueue") as enqueue:
+			out = approve_request(self.name, f"  {self.name} ")
 		self.assertEqual(out["status"], "Awaiting Sign-off")
 		self.assertEqual(out["doc"]["erasure_status"], "Queued")
+		enqueue.assert_called_once_with(
+			"crm.privacy.erasure.run_erasure",
+			queue="long",
+			job_id=f"erasure-{self.name}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+			request=self.name,
+			approver=self.officer,
+		)
 
 	def test_approve_holds_when_she_is_on_an_open_deal(self):
 		create_test_deal(status="Negotiation", deal_value=1, contacts=[{"contact": self.m.contact}])
@@ -140,11 +154,95 @@ class TestErasureRecords(IntegrationTestCase):
 		)
 		self.assertEqual(
 			(row.address_title, row.address_line1, row.city, row.email_id, row.address_type),
-			("", "", "", "", "Personal"),
+			(new_address, "", "", "", "Personal"),
 		)
-		link = frappe.db.get_value("Dynamic Link", {"parenttype": "Address", "parent": new_address}, "link_name")
-		self.assertEqual(link, f"Erased person {self.name}")
+		link = frappe.db.get_value(
+			"Dynamic Link", {"parenttype": "Address", "parent": new_address}, ["link_name", "link_title"], as_dict=True
+		)
+		self.assertEqual((link.link_name, link.link_title), (f"Erased person {self.name}",) * 2)
 		self.assertFalse(frappe.db.exists("Comment", {"reference_doctype": "Address", "comment_type": "Edit"}))
+		self.assertFalse(frappe.db.exists("Dynamic Link", {"link_title": ["like", "%Marisol%"]}))
+
+	def test_communication_link_titles_erased(self):
+		c = make_communication(
+			sender="tyler@northpine.example",
+			recipients=MARISOL_EMAIL,
+			timeline_links=[{"link_doctype": "CRM Lead", "link_name": self.m.lead}],
+		)
+		before = frappe.get_all("Communication Link", {"parent": c}, ["link_doctype", "link_title"])
+		self.assertIn("Contact", [row.link_doctype for row in before])  # linked by her address
+		self.assertTrue(any("Marisol" in (row.link_title or "") for row in before))
+		run_erasure(self.name, self.officer)
+		after = frappe.get_all("Communication Link", {"parent": c}, ["link_doctype", "link_name", "link_title"])
+		placeholder = f"Erased person {self.name}"
+		self.assertEqual({row.link_title for row in after}, {placeholder})
+		self.assertIn(("Contact", placeholder), [(row.link_doctype, row.link_name) for row in after])
+
+	def test_listed_deal_field_blanked_only_on_deals_she_is_on(self):
+		frappe.get_doc(
+			{
+				"doctype": "CRM Personal Field",
+				"parent": "CRM Privacy Settings",
+				"parenttype": "CRM Privacy Settings",
+				"parentfield": "personal_fields",
+				"document_type": "CRM Deal",
+				"fieldname": "next_step",
+			}
+		).db_insert()
+		removed = create_test_deal(
+			status="Won", deal_value=5, organization=self.m.org, deal_owner=self.officer
+		).name
+		for deal in (self.m.won_deal, removed):
+			frappe.db.set_value("CRM Deal", deal, "next_step", "Send Marisol the proposal")
+		frappe.set_user(self.officer)
+		save_request(
+			self.name, {"matches": [{"reference_doctype": "CRM Deal", "reference_name": removed, "confirmed": 1}]}
+		)
+		frappe.set_user("Administrator")
+		run_erasure(self.name, self.officer)
+		self.assertEqual(frappe.db.get_value("CRM Deal", self.m.won_deal, "next_step"), "")
+		self.assertEqual(frappe.db.get_value("CRM Deal", removed, "next_step"), "Send Marisol the proposal")
+
+	def test_compliance_logger_cannot_approve_own_request(self):
+		frappe.set_user(self.officer)
+		own = log_request()
+		save_request(own, {"identifiers": [{"kind": "Email", "value": "someone.else@example.com"}]})
+		submit_request(own)
+		with self.assertRaises(frappe.PermissionError):
+			approve_request(own, own)
+
+	def test_lost_savepoint_still_marks_failed(self):
+		# Simulate a deadlock: the server has rolled back and the savepoint is gone.
+		frappe.db.savepoint("before_erasure")
+		rollback = frappe.db.rollback
+		calls = []
+
+		def fake_rollback(*, save_point=None, chain=False):
+			calls.append(save_point)
+			if save_point == "erasure":
+				raise RuntimeError("(1305, 'SAVEPOINT erasure does not exist')")
+			# Stand-in for the full rollback, which would also undo the test's setUp.
+			return rollback(save_point=save_point or "before_erasure")
+
+		def boom(*a):
+			raise RuntimeError("x")
+
+		with (
+			patch.object(erasure, "STEPS", [erasure.erase_records, boom]),
+			patch.object(frappe.db, "rollback", fake_rollback),
+			patch("frappe.log_error") as log_error,
+		):
+			run_erasure(self.name, self.officer)  # does not raise
+		self.assertEqual(calls, ["erasure", None])
+		r = frappe.db.get_value(
+			"CRM Erasure Request", self.name, ["status", "erasure_status", "erasure_error"], as_dict=True
+		)
+		self.assertEqual((r.status, r.erasure_status), ("Awaiting Sign-off", "Failed"))
+		self.assertIn("RuntimeError", r.erasure_error)
+		self.assertEqual(frappe.db.get_value("CRM Lead", self.m.lead, "email"), MARISOL_EMAIL)
+		log_error.assert_called_once()
+		self.assertEqual(log_error.call_args.kwargs["title"], f"Erasure failed for {self.name}")
+		self.assertEqual(log_error.call_args.kwargs["message"], r.erasure_error)
 
 	def test_no_modified_bump_and_no_new_versions(self):
 		records = (("CRM Lead", self.m.lead), ("CRM Deal", self.m.won_deal), ("CRM Deal", self.m.open_deal))
