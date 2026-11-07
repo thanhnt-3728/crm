@@ -36,6 +36,11 @@
           </Button>
         </template>
       </Dropdown>
+      <RequestErasureButton
+        doctype="CRM Deal"
+        :name="dealId"
+        :contacts="dealContacts.data || []"
+      />
     </template>
   </LayoutHeader>
   <div v-if="doc.name" class="flex h-full overflow-hidden">
@@ -370,6 +375,7 @@ import SuccessIcon from '@/components/Icons/SuccessIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import FileTextIcon from '@/components/Icons/FileTextIcon.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import RequestErasureButton from '@/components/ErasureRequests/RequestErasureButton.vue'
 import Activities from '@/components/Activities/Activities.vue'
 import OrganizationModal from '@/components/Modals/OrganizationModal.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'

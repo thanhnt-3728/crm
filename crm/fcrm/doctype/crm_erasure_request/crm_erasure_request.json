@@ -1,0 +1,398 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-11-07 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "request_type",
+  "status",
+  "column_break_intake",
+  "channel",
+  "date_received",
+  "logged_by",
+  "section_break_requester",
+  "requester_names",
+  "original_message",
+  "section_break_identifiers",
+  "identifiers",
+  "section_break_matches",
+  "matches",
+  "section_break_deadlines",
+  "acknowledge_by",
+  "respond_by",
+  "column_break_ack",
+  "acknowledgment_sent",
+  "acknowledged_on",
+  "section_break_approval",
+  "approver",
+  "approved_on",
+  "erased_on",
+  "column_break_job",
+  "erasure_job_status",
+  "erasure_error",
+  "section_break_checklist",
+  "checklist",
+  "contract_references",
+  "section_break_outcome",
+  "date_answered",
+  "outcome",
+  "denial_reason",
+  "column_break_close",
+  "closed_on",
+  "purge_after",
+  "section_break_internal",
+  "ack_reminder_sent",
+  "day30_reminder_sent",
+  "day40_alert_sent",
+  "approved_plan_hash",
+  "erasure_queued_at",
+  "erasure_started_at",
+  "pending_file_deletions"
+ ],
+ "fields": [
+  {
+   "default": "PDR-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "no_copy": 1,
+   "options": "PDR-.####",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "default": "Erasure",
+   "fieldname": "request_type",
+   "fieldtype": "Select",
+   "label": "Request Type",
+   "options": "Erasure",
+   "read_only": 1
+  },
+  {
+   "default": "Logged",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "no_copy": 1,
+   "options": "Logged\nAwaiting sign-off\nOn Hold\nErased\nDeclined\nClosed",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_intake",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "How it arrived",
+   "options": "Email\nPhone\nWeb form\nMail\nOther",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "date_received",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date Received",
+   "reqd": 1
+  },
+  {
+   "fieldname": "logged_by",
+   "fieldtype": "Link",
+   "label": "Logged By",
+   "no_copy": 1,
+   "options": "User",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "section_break_requester",
+   "fieldtype": "Section Break",
+   "label": "Requester"
+  },
+  {
+   "fieldname": "requester_names",
+   "fieldtype": "Small Text",
+   "label": "Name(s)"
+  },
+  {
+   "fieldname": "original_message",
+   "fieldtype": "Text",
+   "label": "Original Message"
+  },
+  {
+   "fieldname": "section_break_identifiers",
+   "fieldtype": "Section Break",
+   "label": "Identifiers"
+  },
+  {
+   "fieldname": "identifiers",
+   "fieldtype": "Table",
+   "label": "Identifiers",
+   "options": "CRM Erasure Identifier"
+  },
+  {
+   "fieldname": "section_break_matches",
+   "fieldtype": "Section Break",
+   "label": "Matched Records"
+  },
+  {
+   "fieldname": "matches",
+   "fieldtype": "Table",
+   "label": "Matched Records",
+   "options": "CRM Erasure Match"
+  },
+  {
+   "fieldname": "section_break_deadlines",
+   "fieldtype": "Section Break",
+   "label": "Deadlines"
+  },
+  {
+   "fieldname": "acknowledge_by",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Acknowledge By",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "respond_by",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Respond By",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_ack",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "acknowledgment_sent",
+   "fieldtype": "Check",
+   "label": "Acknowledgment Sent",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "acknowledged_on",
+   "fieldtype": "Date",
+   "label": "Acknowledged On",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_approval",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "fieldname": "approver",
+   "fieldtype": "Link",
+   "label": "Approver",
+   "no_copy": 1,
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "erased_on",
+   "fieldtype": "Datetime",
+   "label": "Erased On",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_job",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "erasure_job_status",
+   "fieldtype": "Select",
+   "label": "Erasure Job Status",
+   "no_copy": 1,
+   "options": "\nQueued\nRunning\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "erasure_error",
+   "fieldtype": "Small Text",
+   "label": "Erasure Error",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_checklist",
+   "fieldtype": "Section Break",
+   "label": "Checklist"
+  },
+  {
+   "fieldname": "checklist",
+   "fieldtype": "Table",
+   "label": "Checklist",
+   "options": "CRM Erasure Checklist Item"
+  },
+  {
+   "fieldname": "contract_references",
+   "fieldtype": "Table",
+   "label": "Contract References",
+   "options": "CRM Erasure Contract Reference"
+  },
+  {
+   "fieldname": "section_break_outcome",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "date_answered",
+   "fieldtype": "Date",
+   "label": "Date Answered",
+   "no_copy": 1
+  },
+  {
+   "fieldname": "outcome",
+   "fieldtype": "Select",
+   "label": "Outcome",
+   "no_copy": 1,
+   "options": "\nCompleted\nPartly completed\nDenied"
+  },
+  {
+   "fieldname": "denial_reason",
+   "fieldtype": "Text",
+   "label": "Denial Reason",
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_close",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "closed_on",
+   "fieldtype": "Date",
+   "label": "Closed On",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "purge_after",
+   "fieldtype": "Date",
+   "label": "Purge After",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_internal",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Internal"
+  },
+  {
+   "default": "0",
+   "fieldname": "ack_reminder_sent",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Acknowledgment Reminder Sent",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "day30_reminder_sent",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Day 30 Reminder Sent",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "day40_alert_sent",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Day 40 Alert Sent",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_plan_hash",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Approved Plan Hash",
+   "no_copy": 1,
+   "permlevel": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "erasure_queued_at",
+   "fieldtype": "Datetime",
+   "hidden": 1,
+   "label": "Erasure Queued At",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "erasure_started_at",
+   "fieldtype": "Datetime",
+   "hidden": 1,
+   "label": "Erasure Started At",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "pending_file_deletions",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Pending File Deletions",
+   "no_copy": 1,
+   "permlevel": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-07 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Erasure Request",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Compliance",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Sales Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Sales User",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "respond_by",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

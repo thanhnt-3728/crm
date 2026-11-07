@@ -17,16 +17,19 @@ export const usersStore = defineStore('crm-users', () => {
     cache: 'crm-users',
     initialData: [],
     auto: true,
-    transform([allUsers, crmUsers]) {
+    transform([allUsers, crmUsers, complianceUsers]) {
       allUsers = normalizeUsers(allUsers)
       crmUsers = normalizeUsers(crmUsers)
+      // Compliance-only users use the erasure pages but are never assignable,
+      // so they are kept out of crmUsers, the list behind every picker
+      complianceUsers = normalizeUsers(complianceUsers)
       for (let user of allUsers) {
         usersByName[user.name] = user
         if (user.name === 'Administrator') {
           usersByName[user.email] = user
         }
       }
-      return { allUsers, crmUsers }
+      return { allUsers, crmUsers, complianceUsers }
     },
     onError(error) {
       if (error && error.exc_type === 'AuthenticationError') {
@@ -161,7 +164,10 @@ export const usersStore = defineStore('crm-users', () => {
 
   const isCrmUser = (user) => {
     user = user || session.user
-    return users.data.crmUsers?.find((u) => u.name === user)
+    return (
+      users.data.crmUsers?.find((u) => u.name === user) ||
+      users.data.complianceUsers?.find((u) => u.name === user)
+    )
   }
 
   return {

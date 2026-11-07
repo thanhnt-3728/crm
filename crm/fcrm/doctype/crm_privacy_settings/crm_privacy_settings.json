@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "creation": "2026-11-07 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "head_of_compliance",
+  "contract_retention_months",
+  "personal_fields_section",
+  "personal_fields",
+  "dnc_hash_secret"
+ ],
+ "fields": [
+  {
+   "description": "Receives the day-40 escalation for erasure requests that are still open",
+   "fieldname": "head_of_compliance",
+   "fieldtype": "Link",
+   "label": "Head of Compliance",
+   "options": "User"
+  },
+  {
+   "description": "How long a signed contract or order blocks erasure of the personal data it needs. Set per counsel's instruction",
+   "fieldname": "contract_retention_months",
+   "fieldtype": "Int",
+   "label": "Contract Retention Period (months)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "personal_fields_section",
+   "fieldtype": "Section Break",
+   "label": "Personal Fields"
+  },
+  {
+   "description": "Fields blanked on erasure. Add custom fields that identify a person here",
+   "fieldname": "personal_fields",
+   "fieldtype": "Table",
+   "label": "Personal Fields",
+   "options": "CRM Personal Field"
+  },
+  {
+   "fieldname": "dnc_hash_secret",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Do Not Contact Hash Secret",
+   "no_copy": 1,
+   "permlevel": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Privacy Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

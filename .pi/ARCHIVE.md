@@ -168,3 +168,32 @@ Three patterns were considered:
 
 > Current stable API: [SPEC.md — formDialog API](./SPEC.md#formdialog-api)  
 > Full guide with examples: [feats/form-scripting/form-dialog.md](./feats/form-scripting/form-dialog.md)
+
+
+---
+
+## CCPA erasure requests
+
+> **Completed (v16 bench).** Guide: [docs/erasure-requests.md](../docs/erasure-requests.md). Design of record: `docs/design/2026-11-05-ccpa-erasure-requests-design.md`. Plan and phase reports: `.takumi/outputs/plans/261106-2210-ccpa-erasure-requests/`.
+
+### Decisions made while building
+
+| Call | Why |
+|---|---|
+| Erasure writes straight to the DB (`update_modified=False`), never `doc.save()` | A save writes a new Version with the old values and fires deal, contact and automation hooks. `modified` is also what keeps history from showing an edit |
+| "Holds Compliance" = an explicit `Has Role` row | `frappe.get_roles("Administrator")` returns every role |
+| The job re-checks the hold, the approver and a hash of the approved plan | What was approved is what runs; the request is frozen while Queued or Running |
+| [I1] v16 bench only | This branch cannot install on Frappe 15 (`whatsapp` needs Frappe 16, Python 3.14). The v15 proof is deferred to the backport |
+| [I2] A deal closed while On Hold stays an unconfirmed suggestion | RT-14 beats the older "becomes a confirmed match" rule; her contact copy on it is still anonymized |
+| [I3] A shared address is not blanked | Only her link is removed (and the docname renamed if it holds her value); blanking it would damage a colleague's record |
+| [I4] Comments of every type are erased | Attachment and Info comments carry file names and addresses |
+
+### Found by the leak sweep (phase 08)
+
+- `Dynamic Link.link_title` and `Communication Link.link_title` cache the linked record's title: renaming her contact to the placeholder left "Marisol Vega" in them. `rename_support.py` now resets them.
+- A failed lead-sync log kept her name beside the blanked email. The log is one rejected lead, so every text value is blanked (`scrub_json.blank_text_values`).
+- `__global_search` and Error Log are MyISAM: their rows survive a test rollback. Tests that close a request remove the search rows they added, by exact key (`LifecycleCase`).
+
+### Tests
+
+`test_dashboard_invariance.py` (all dashboard numbers identical before and after the lifecycle) and `test_erasure_leak_sweep.py` (every text column of every table searched for her emails, phones and name after the erasure and after the close).

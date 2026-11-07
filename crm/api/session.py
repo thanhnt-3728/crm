@@ -1,7 +1,11 @@
 import frappe
 from frappe import _
 
-CRM_ALLOWED_ROLES = ["System Manager", "Sales Manager", "Sales User"]
+# Who owns, is assigned and works on sales records. Only these users are offered in assignment pickers.
+CRM_SALES_ROLES = ["System Manager", "Sales Manager", "Sales User"]
+# Who passes the CRM gate. Compliance matches `check_app_permission`: the privacy team works on erasure requests
+# without a sales role, and sees no sales data (`get_organizations` gives them nothing).
+CRM_ALLOWED_ROLES = [*CRM_SALES_ROLES, "Compliance"]
 
 
 def get_session_role_flags():
@@ -17,6 +21,12 @@ def get_session_role_flags():
 		and "Sales Manager" not in roles
 		and "System Manager" not in roles,
 	}
+
+
+def is_compliance_only() -> bool:
+	"""Compliance is the session's only CRM role: no sales role, so no sales data."""
+	roles = set(frappe.get_roles())
+	return "Compliance" in roles and not roles.intersection(CRM_SALES_ROLES)
 
 
 USER_FIELDS = [
@@ -36,7 +46,10 @@ USER_FIELDS = [
 
 @frappe.whitelist()
 def get_users(include_all: bool = False):
-	"""Return (users, crm_users) for the CRM frontend.
+	"""Return (users, crm_users, compliance_users) for the CRM frontend.
+
+	`crm_users` are the users with a sales role: the only ones offered for assignment. `compliance_users` hold
+	Compliance and no sales role: they can use the erasure pages and are never assignable.
 
 	By default (`include_all=False`) the User query is filtered at SQL level
 	to just users with CRM roles — typically a handful of rows. This unblocks
@@ -80,7 +93,7 @@ def get_users(include_all: bool = False):
 	).run(as_dict=1)
 
 	if not users:
-		return [], []
+		return [], [], []
 
 	system_language = frappe.db.get_single_value("System Settings", "language")
 	session_user = frappe.session.user
@@ -101,8 +114,9 @@ def get_users(include_all: bool = False):
 	# than serializing an IN list and gives identical results.
 	telephony_agents = set(frappe.get_all("CRM Telephony Agent", pluck="user"))
 
-	role_priority = ("System Manager", "Sales Manager", "Sales User", "Guest")
+	role_priority = (*CRM_SALES_ROLES, "Compliance", "Guest")
 	crm_users = []
+	compliance_users = []
 
 	for user in users:
 		if session_user == user.name:
@@ -126,14 +140,16 @@ def get_users(include_all: bool = False):
 		user.is_telephony_agent = user.name in telephony_agents
 		user.language = user.language or system_language
 
-		if user.role in CRM_ALLOWED_ROLES:
+		if user.role in CRM_SALES_ROLES:
 			crm_users.append(user)
+		elif user.role == "Compliance":
+			compliance_users.append(user)
 
 	if not include_all:
-		# Fast path — both positions are the CRM users.
-		return crm_users, crm_users
+		# Fast path — the first position is every CRM user, so names and roles resolve.
+		return [*crm_users, *compliance_users], crm_users, compliance_users
 
-	return users, crm_users
+	return users, crm_users, compliance_users
 
 
 @frappe.whitelist()
@@ -162,6 +178,8 @@ def get_user_info(users: str | list):
 @frappe.whitelist()
 def get_organizations():
 	get_session_role_flags()
+	if is_compliance_only():
+		return []  # sales data: the SPA loads this for everyone, so an empty list, not an error
 
 	organizations = frappe.qb.get_query(
 		"CRM Organization",

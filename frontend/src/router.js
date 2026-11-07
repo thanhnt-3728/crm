@@ -130,6 +130,17 @@ const routes = [
     meta: { viewKey: 'data-import' },
   },
   {
+    path: '/erasure-requests',
+    name: 'ErasureRequests',
+    component: () => import('@/pages/ErasureRequests.vue'),
+  },
+  {
+    path: '/erasure-requests/:requestId',
+    name: 'ErasureRequest',
+    component: () => import('@/pages/ErasureRequest.vue'),
+    props: true,
+  },
+  {
     path: '/welcome',
     name: 'Welcome',
     component: () => import('@/pages/Welcome.vue'),
@@ -164,7 +175,7 @@ router.beforeEach(async (to, from, next) => {
   router.previousRoute = from
 
   const { isLoggedIn, user } = sessionStore()
-  const { users, isCrmUser, isAdmin } = usersStore()
+  const { users, isCrmUser, isAdmin, getUserRole } = usersStore()
 
   if (isLoggedIn && !users.fetched) {
     try {
@@ -188,6 +199,8 @@ router.beforeEach(async (to, from, next) => {
   } else if (to.name === 'Not Permitted' && isLoggedIn && isCrmUser()) {
     next({ name: 'Home' })
   } else if (to.name === 'Home' && isLoggedIn) {
+    // no leads or deals for a user whose only role is Compliance: start on their page
+    if (getUserRole() === 'Compliance') return next({ name: 'ErasureRequests' })
     const { views, getDefaultView } = viewsStore()
     await views.promise
 

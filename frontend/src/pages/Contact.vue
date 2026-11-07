@@ -17,6 +17,7 @@
         iconLeft="lucide-plus"
         @click="openDealModal"
       />
+      <RequestErasureButton doctype="Contact" :name="contactId" />
     </template>
   </LayoutHeader>
   <div v-if="contact.doc" ref="parentRef" class="flex h-full">
@@ -183,6 +184,7 @@ import Resizer from '@/components/Resizer.vue'
 import Icon from '@/components/Icon.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
+import RequestErasureButton from '@/components/ErasureRequests/RequestErasureButton.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import DealsIcon from '@/components/Icons/DealsIcon.vue'

@@ -1,6 +1,7 @@
 import { globalStore } from '@/stores/global'
 import { sessionStore } from '@/stores/session'
 import { usersStore } from '@/stores/users'
+import { canReadSalesData, runIfSalesUser } from '@/utils/salesAccess'
 import { createListResource, createResource, toast } from 'frappe-ui'
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
@@ -40,7 +41,7 @@ const dotColors: Record<string, string> = {
 
 export const availabilityStore = defineStore('crm-availability', () => {
   const session = sessionStore()
-  const { users, getUser } = usersStore()
+  const { users, getUser, getUserRole } = usersStore()
   const { $socket } = globalStore()
 
   const statuses = createListResource({
@@ -50,8 +51,16 @@ export const availabilityStore = defineStore('crm-availability', () => {
     cache: 'crm-availability-statuses',
     pageLength: 100,
     initialData: [],
-    auto: true,
+    auto: false,
   })
+
+  // a Compliance-only user may not read the statuses (403). The layout builds
+  // this store before the users list has loaded, so the role is checked once it has.
+  runIfSalesUser(users.promise, getUserRole, () => statuses.fetch())
+
+  function reloadStatuses() {
+    if (canReadSalesData(getUserRole())) statuses.reload()
+  }
 
   const enabledStatuses = computed<AvailabilityStatus[]>(() =>
     (statuses.data || []).filter((s: AvailabilityStatus) => s.enabled),
@@ -106,13 +115,13 @@ export const availabilityStore = defineStore('crm-availability', () => {
   // statuses can be renamed, recategorised or disabled while a tab is open;
   // a rename also changes users' crm_availability
   $socket.on('crm_availability_statuses_updated', () => {
-    statuses.reload()
+    reloadStatuses()
     users.reload()
   })
 
   // events sent while the tab was offline are lost, so refetch after reconnecting
   $socket.io.on('reconnect', () => {
-    statuses.reload()
+    reloadStatuses()
     users.reload()
   })
 

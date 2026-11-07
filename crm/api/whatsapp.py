@@ -8,6 +8,7 @@ from pypika import Criterion
 from crm.api.doc import get_assigned_users
 from crm.fcrm.doctype.crm_notification.crm_notification import notify_user
 from crm.integrations.api import find_by_phone, find_contact_lead_or_deal_from_number
+from crm.privacy.do_not_contact import skip_blocked
 from crm.utils import normalize_phone
 
 ALLOWED_WHATSAPP_ROLES = ["System Manager", "Sales Manager", "Sales User"]
@@ -67,10 +68,11 @@ def _lead_append_action(account: str | None):
 	return None
 
 
-def _create_lead(doc, action) -> str:
+def _create_lead(doc, action) -> str | None:
 	"""Built as the whatsapp app's append action would build it, so the message's reference
 	is set before that action runs and it finds nothing left to do. The source is the one
-	thing the whatsapp app cannot know."""
+	thing the whatsapp app cannot know. Returns None, and the message stays unlinked, when
+	the sender asked to be erased: the message itself is never rejected."""
 	profile = frappe.get_cached_doc("WA Profile", doc.to)
 	lead = frappe.new_doc("CRM Lead")
 	lead.set(action.sender_field, profile.phone_number)
@@ -81,8 +83,9 @@ def _create_lead(doc, action) -> str:
 		lead.set(action.timestamp_field, doc.timestamp)
 	if frappe.db.exists("CRM Lead Source", LEAD_SOURCE):
 		lead.source = LEAD_SOURCE
-	lead.insert(ignore_permissions=True)
-	return lead.name
+	with skip_blocked("WhatsApp lead creation") as skip:
+		lead.insert(ignore_permissions=True)
+	return None if skip.skipped else lead.name
 
 
 def _get_phone_number_from_profile(doc) -> str | None:

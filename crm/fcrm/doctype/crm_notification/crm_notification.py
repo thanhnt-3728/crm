@@ -24,7 +24,7 @@ class CRMNotification(Document):
 		reference_doctype: DF.Link | None
 		reference_name: DF.DynamicLink | None
 		to_user: DF.Link
-		type: DF.Literal["Mention", "Task", "Assignment", "WhatsApp"]
+		type: DF.Literal["Mention", "Task", "Assignment", "WhatsApp", "Automation", "Compliance"]
 	# end: auto-generated types
 
 	def on_update(self):
