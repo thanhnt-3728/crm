@@ -68,6 +68,27 @@ class TestRulesStruct(UnitTestCase):
 		out = replace_addresses("Tyler Reed <tyler@northpine.example>", EMAILS, "P")
 		self.assertEqual(out, "Tyler Reed <tyler@northpine.example>")
 
+	def test_replace_addresses_non_ascii_name_not_encoded(self):
+		out = replace_addresses('"José Núñez" <jose@x.example>, marisol@sierrafoothills.example', EMAILS, "P")
+		self.assertEqual(out, "José Núñez <jose@x.example>, P")
+
+	def test_replace_addresses_quotes_name_with_specials(self):
+		out = replace_addresses('"Reed, Tyler" <t@y.example>, marisol@sierrafoothills.example', EMAILS, "P")
+		self.assertEqual(out, '"Reed, Tyler" <t@y.example>, P')
+
+	def test_replace_addresses_no_match_is_byte_identical(self):
+		header = '"José Núñez"   <Jose@x.example> ,  "Reed, Tyler" <t@y.example>'
+		self.assertEqual(replace_addresses(header, EMAILS, "P"), header)
+
+	def test_replace_addresses_quoted_comma_name_of_hers(self):
+		out = replace_addresses('"Vega, Marisol" <marisol@sierrafoothills.example>, t@y.example', EMAILS, "P")
+		self.assertEqual(out, "P, t@y.example")
+
+	def test_replace_addresses_unparseable_falls_back_to_text_scrub(self):
+		out = replace_addresses("<marisol@sierrafoothills.example>, bad@@x", EMAILS, "P")
+		self.assertIn("bad@@x", out)
+		self.assertNotIn("sierrafoothills", out)
+
 	def test_scrub_version_changed_rows(self):
 		data = {
 			"changed": [["email", "marisol@sierrafoothills.example", ""], ["status", "New", "Contacted"]],
@@ -92,4 +113,6 @@ class TestRulesStruct(UnitTestCase):
 		out = scrub_version_data(data, lambda f, v: f in {"email_id", "email"}, "P")
 		self.assertEqual(out["removed"][0][1], {"email_id": "P", "idx": 1})
 		self.assertEqual(out["comment"], "kept")
-		self.assertEqual(out["changed"][2], ["email", "P", "P"])
+		self.assertEqual(out["changed"], ["junk", ["a"], ["email", "P", "P"]])
+		self.assertEqual(out["added"], [None, ["email_ids", "not-a-dict"]])
+		self.assertEqual(out["row_changed"], [["t", 1], ["t", 1, "r", "bad"]])

@@ -3,7 +3,7 @@
 import copy
 import re
 from collections.abc import Callable
-from email.utils import formataddr, getaddresses
+from email.utils import getaddresses
 from typing import Any
 
 import phonenumbers
@@ -112,20 +112,39 @@ def deal_fields_to_blank(
 def replace_addresses(header: str | None, emails: set[str], placeholder: str) -> str:
 	"""Replace each address in `header` that is in `emails`, with its display name, by `placeholder`.
 
-	Other addresses are kept and re-joined as ", "-separated `formataddr` output.
+	A header none of whose addresses match is returned unchanged. Otherwise the other
+	addresses are re-joined with ", " as `name <addr>` (name quoted only when it has
+	specials, never RFC 2047 encoded) or bare `addr`. A header that cannot be parsed
+	falls back to plain-text identifier scrubbing.
 	"""
 	if not header:
 		return ""
 
+	parsed = [(name, addr) for name, addr in getaddresses([header]) if name or addr]
+	if not parsed:
+		return scrub_identifiers(header, emails, set(), placeholder)
+	if not any(normalize_email(addr) in emails for _, addr in parsed):
+		return header
+
 	parts: list[str] = []
-	for name, addr in getaddresses([header]):
-		if not name and not addr:
-			continue
+	for name, addr in parsed:
 		if normalize_email(addr) in emails:
 			parts.append(placeholder)
 		else:
-			parts.append(formataddr((name, addr)))
+			parts.append(_format_address(name, addr))
 	return ", ".join(parts)
+
+
+_ADDRESS_SPECIALS = set('()<>@,:;.[]"\\')
+
+
+def _format_address(name: str, addr: str) -> str:
+	"""`name <addr>` without charset encoding; the name is quoted only if it contains specials."""
+	if not name:
+		return addr
+	if any(ch in _ADDRESS_SPECIALS for ch in name):
+		name = '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+	return f"{name} <{addr}>" if addr else name
 
 
 def _scrub_pairs(pairs: Any, should_scrub: Callable[[str, Any], bool], placeholder: str) -> None:
