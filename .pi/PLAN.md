@@ -274,3 +274,14 @@ this.field('lost_reason')
 5. **Incremental, independently shippable** — Each phase merges and is usable on its own.
 
 6. **Extensibility via records** — Third-party apps extend via `CRM Form Script` records. No source code modification. Multiple scripts per doctype run sequentially; last-write-wins for overrides.
+
+
+---
+
+## Erasure requests: follow-ups
+
+- Prove the executor and the `rename_doc` spike on the Frappe 15 lane when the feature is backported.
+- Mobile entry points and mobile erasure pages (the notification route in `MobileNotification.vue` still assumes a lead).
+- Requests to know, correct or opt out (planned Q2 2027): the request type field already exists and is always "Erasure".
+- Let Compliance send the outcome email from the request (a Compliance-only user has no `email` permission on the request nor `create` on Communication).
+- Show the owner's name on hold-deal matches (needs a server field on the match row).
