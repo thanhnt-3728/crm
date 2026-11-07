@@ -130,6 +130,17 @@ const routes = [
     meta: { viewKey: 'data-import' },
   },
   {
+    path: '/erasure-requests',
+    name: 'Erasure Requests',
+    component: () => import('@/pages/ErasureRequests.vue'),
+  },
+  {
+    path: '/erasure-requests/:requestId',
+    name: 'Erasure Request',
+    component: () => import('@/pages/ErasureRequest.vue'),
+    props: true,
+  },
+  {
     path: '/welcome',
     name: 'Welcome',
     component: () => import('@/pages/Welcome.vue'),

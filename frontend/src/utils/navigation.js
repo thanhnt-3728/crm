@@ -6,6 +6,7 @@ import OrganizationsIcon from '@/components/Icons/OrganizationsIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
+import LucideShieldOff from '~icons/lucide/shield-off'
 import router from '@/router'
 
 export const navigationItems = [
@@ -22,6 +23,11 @@ export const navigationItems = [
   { label: 'Notes', icon: NoteIcon, route: 'Notes' },
   { label: 'Tasks', icon: TaskIcon, route: 'Tasks' },
   { label: 'Call Logs', icon: PhoneIcon, route: 'Call Logs' },
+  {
+    label: 'Erasure requests',
+    icon: LucideShieldOff,
+    route: 'Erasure Requests',
+  },
 ]
 
 export function getNavigationItems({ mobile = false } = {}) {

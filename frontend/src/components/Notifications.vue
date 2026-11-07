@@ -137,6 +137,12 @@ function getRoute(notification) {
     params = {
       dealId: notification.reference_name,
     }
+  } else if (notification.route_name === 'Erasure Request') {
+    params = {
+      requestId: notification.reference_name,
+    }
+  } else if (notification.route_name === 'Erasure Requests') {
+    params = {}
   }
 
   return {
