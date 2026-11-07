@@ -257,7 +257,7 @@ if int(frappe.__version__.split(".")[0]) < 16:
 
 doc_events = {
 	"Contact": {
-		"validate": ["crm.api.contact.validate"],
+		"validate": ["crm.api.contact.validate", "crm.privacy.blocking.check_doc"],
 	},
 	"Notification Log": {
 		"before_insert": ["crm.extends.notification_log.before_insert"],
@@ -288,6 +288,7 @@ doc_events = {
 		],
 	},
 	"CRM Deal": {
+		"validate": ["crm.privacy.blocking.check_doc"],
 		"on_update": [
 			"crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.create_customer_in_erpnext",
 			"crm.automation.events.on_deal_update",
@@ -295,6 +296,7 @@ doc_events = {
 		],
 	},
 	"CRM Lead": {
+		"validate": ["crm.privacy.blocking.check_doc"],
 		"on_update": ["crm.automation.events.on_lead_update"],
 	},
 	"Sales Order": {
