@@ -12,6 +12,7 @@ from frappe.utils import cint, getdate
 from crm.privacy.deadlines import days_left
 from crm.privacy.hold import apply_hold
 from crm.privacy.identifiers import normalize_identifier
+from crm.privacy.lifecycle import close
 from crm.privacy.matching import (
 	MANUAL_REASON,
 	contact_identifiers,
@@ -25,6 +26,7 @@ from crm.privacy.plan import plan_erasure, preview
 
 DOCTYPE = "CRM Erasure Request"
 SOURCE_DOCTYPES = ("CRM Lead", "Contact", "CRM Deal")
+OUTCOMES = ("Completed", "Partly completed", "Denied")
 
 SIMPLE_KEYS = (
 	"arrived_via",
@@ -387,4 +389,70 @@ def approve_request(name: str, confirmation: str) -> dict:
 		request=name,
 		approver=frappe.session.user,
 	)
+	return get_request(name)
+
+
+@frappe.whitelist()
+def decline_request(name: str, reason: str) -> dict:
+	"""Decline a request that has not been erased. The reason is required."""
+	if not is_compliance():
+		frappe.throw(_("Only Compliance can decline a request"), frappe.PermissionError)
+	doc = frappe.get_doc(DOCTYPE, name)
+	if not _can(doc)["decline"]:
+		frappe.throw(_("This request can no longer be declined"), frappe.ValidationError)
+	reason = (reason or "").strip()
+	if not reason:
+		frappe.throw(_("Give a reason for declining"), frappe.ValidationError)
+
+	doc.flags.privacy_system_write = True
+	doc.flags.ignore_permissions = True
+	doc.status = "Declined"
+	doc.decline_reason = reason
+	doc.save()
+	return get_request(name)
+
+
+@frappe.whitelist()
+def close_request(name: str, date_answered: str, outcome: str, denial_reason: str | None = None) -> dict:
+	"""Close an erased or declined request and wipe what is left of the person on it.
+
+	There is no undo: the identifiers, matches and free text are removed.
+	"""
+	if not is_compliance():
+		frappe.throw(_("Only Compliance can close a request"), frappe.PermissionError)
+	doc = frappe.get_doc(DOCTYPE, name)
+	if not _can(doc)["close"]:
+		frappe.throw(_("Only an erased or declined request can be closed"), frappe.ValidationError)
+
+	if outcome not in OUTCOMES:
+		frappe.throw(_("Choose an outcome: {0}").format(", ".join(OUTCOMES)), frappe.ValidationError)
+	if doc.status == "Declined" and outcome != "Denied":
+		frappe.throw(_("A declined request can only be closed as Denied"), frappe.ValidationError)
+	reason = (denial_reason or "").strip() or (doc.decline_reason or "").strip()
+	if outcome == "Denied" and not reason:
+		frappe.throw(_("Give the reason the request was denied"), frappe.ValidationError)
+	if any(not row.done for row in doc.checklist):
+		frappe.throw(_("Finish every checklist item before closing"), frappe.ValidationError)
+
+	try:
+		answered = getdate(date_answered)
+	except Exception:
+		frappe.throw(_("Enter the date the requester was answered"), frappe.ValidationError)
+	if answered < getdate(doc.date_received):
+		frappe.throw(_("The answer date cannot be before the date received"), frappe.ValidationError)
+	if answered > getdate():
+		frappe.throw(_("The answer date cannot be in the future"), frappe.ValidationError)
+
+	# Checks above passed for a Compliance user; the writes are the system's.
+	frappe.db.set_value(
+		DOCTYPE,
+		name,
+		{
+			"date_answered": answered,
+			"outcome": outcome,
+			"denial_reason": reason if outcome == "Denied" else "",
+		},
+		update_modified=False,
+	)
+	close(doc)
 	return get_request(name)
