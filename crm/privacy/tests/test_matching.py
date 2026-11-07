@@ -4,7 +4,7 @@ from frappe.tests import IntegrationTestCase
 from crm.fcrm.doctype.crm_deal.test_crm_deal import create_test_contact
 from crm.permissions.test_org_hierarchy import make_user
 from crm.privacy.api import get_request, get_requests, log_request, refresh_request_matches, save_request
-from crm.privacy.matching import identifier_usage, refresh_matches
+from crm.privacy.matching import identifier_usage, like_escape, refresh_matches
 from crm.privacy.tests.factories import make_compliance_user, make_marisol, make_request
 
 
@@ -88,6 +88,28 @@ class TestMatching(IntegrationTestCase):
 		self.assertEqual(keys[("Contact", stranger_confirmed.name)], 1)
 		self.assertEqual(keys[("Contact", m.contact)], 1)
 		self.assertEqual(keys[("CRM Deal", m.open_deal)], 0)
+
+	def test_like_wildcards_in_identifiers_match_literally(self):
+		make_marisol()
+		frappe.get_doc(
+			{
+				"doctype": "Communication",
+				"communication_type": "Communication",
+				"communication_medium": "Email",
+				"sent_or_received": "Received",
+				"subject": "Hello",
+				"sender": "marisol@sierrafoothills.example",
+				"recipients": "sales@example.com",
+				"content": "hi",
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(like_escape("a%b_c\\d"), "a\\%b\\_c\\\\d")
+		table = frappe.qb.DocType("Communication")
+		for pattern in ("%", "_", "marisol_sierrafoothills.example"):
+			hits = frappe.qb.from_(table).select(table.name).where(table.sender.like(f"%{like_escape(pattern)}%")).run()
+			self.assertEqual(len(hits), 0)
+		r = make_request(identifiers=[{"kind": "Email", "value": "%"}, {"kind": "Email", "value": "_"}])
+		self.assertEqual([u["emails"] for u in identifier_usage(r)], [0, 0])
 
 	def test_identifier_usage_counts_records_emails_and_calls(self):
 		m = make_marisol()
@@ -296,3 +318,74 @@ class TestRequestApi(IntegrationTestCase):
 		frappe.db.set_value("CRM Erasure Request", name, "status", "Awaiting Sign-off")
 		with self.assertRaises(frappe.PermissionError):
 			save_request(name, {"requester_name": "x"})
+
+	def test_compliance_ticks_checklist_and_acknowledges_on_erased_request(self):
+		officer = make_compliance_user()
+		frappe.set_user(officer)
+		name = log_request()
+		out = save_request(name, {"checklist": [{"description": "Delete recordings at provider (Twilio)"}]})
+		row = out["doc"]["checklist"][0]
+		frappe.db.set_value("CRM Erasure Request", name, "status", "Erased")
+		self.assertFalse(get_request(name)["can"]["edit"])
+		out = save_request(
+			name,
+			{
+				"checklist": [{"name": row["name"], "done": 1}],
+				"acknowledgment_sent": 1,
+				"acknowledged_on": frappe.utils.today(),
+			},
+		)
+		self.assertEqual(out["doc"]["checklist"][0]["done"], 1)
+		self.assertEqual(out["doc"]["checklist"][0]["done_by"], officer)
+		self.assertEqual(out["doc"]["acknowledgment_sent"], 1)
+		# anything else still needs edit access
+		with self.assertRaises(frappe.PermissionError):
+			save_request(name, {"requester_name": "x"})
+
+	def test_checklist_keys_skip_match_refresh(self):
+		officer = make_compliance_user()
+		m = make_marisol()
+		name = log_request("CRM Lead", m.lead)
+		frappe.set_user(officer)
+		frappe.db.set_value("CRM Erasure Request", name, "status", "Erased")
+		before = [(x["reference_doctype"], x["reference_name"]) for x in get_request(name)["doc"]["matches"]]
+		# a new record matching the identifiers would be suggested by a refresh
+		create_test_contact(first_name="Late", email="marisol@sierrafoothills.example")
+		out = save_request(name, {"checklist": [{"description": "Delete recordings"}]})
+		after = [(x["reference_doctype"], x["reference_name"]) for x in out["doc"]["matches"]]
+		self.assertEqual(before, after)
+
+	def test_logger_cannot_tick_checklist_or_acknowledge_on_logged_request(self):
+		officer = make_compliance_user()
+		frappe.set_user(officer)
+		name = log_request()
+		row = save_request(name, {"checklist": [{"description": "x"}]})["doc"]["checklist"][0]
+		make_user("rep10@example.com", ["Sales User"])
+		frappe.db.set_value("CRM Erasure Request", name, "logged_by", "rep10@example.com")
+		frappe.set_user("rep10@example.com")
+		with self.assertRaises(frappe.PermissionError):
+			save_request(name, {"checklist": [{"name": row["name"], "done": 1}]})
+		with self.assertRaises(frappe.PermissionError):
+			save_request(name, {"acknowledgment_sent": 1})
+
+	def test_manually_added_unconfirmed_match_survives_save(self):
+		make_marisol()
+		stranger = create_test_contact(first_name="Stranger", email="stranger@example.com")
+		name = log_request()
+		out = save_request(
+			name, {"matches": [{"reference_doctype": "Contact", "reference_name": stranger.name, "confirmed": 0}]}
+		)
+		rows = {(x["reference_doctype"], x["reference_name"]): x for x in out["doc"]["matches"]}
+		self.assertEqual(rows[("Contact", stranger.name)]["reason"], "Added manually")
+		self.assertEqual(rows[("Contact", stranger.name)]["confirmed"], 0)
+		out = save_request(name, {"requester_name": "S"})
+		keys = {(x["reference_doctype"], x["reference_name"]) for x in out["doc"]["matches"]}
+		self.assertIn(("Contact", stranger.name), keys)
+
+	def test_non_dict_rows_are_validation_errors(self):
+		name = log_request()
+		for key in ("identifiers", "matches", "checklist"):
+			with self.assertRaises(frappe.ValidationError):
+				save_request(name, {key: ["not a dict"]})
+		with self.assertRaises(frappe.ValidationError):
+			save_request(name, {"identifiers": "nope"})

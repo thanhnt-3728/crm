@@ -12,6 +12,7 @@ from frappe.utils import getdate
 from crm.privacy.deadlines import days_left
 from crm.privacy.identifiers import normalize_identifier
 from crm.privacy.matching import (
+	MANUAL_REASON,
 	contact_identifiers,
 	identifier_usage,
 	lead_identifiers,
@@ -36,6 +37,8 @@ SIMPLE_KEYS = (
 TABLE_KEYS = ("identifiers", "matches", "checklist")
 ALLOWED_KEYS = SIMPLE_KEYS + TABLE_KEYS
 CHECKLIST_KEYS = ("acknowledgment_sent", "acknowledged_on")
+# These need manage_checklist instead of edit, so Compliance can tick items after Erased.
+CHECKLIST_ONLY_KEYS = ("checklist", *CHECKLIST_KEYS)
 
 
 def _days_left(status: str, received) -> int | None:
@@ -244,7 +247,7 @@ def _merge_matches(doc, rows: list[dict]) -> None:
 				"reference_doctype": doctype,
 				"reference_name": name,
 				"title": record_title(doctype, name),
-				"reason": "Added manually",
+				"reason": MANUAL_REASON,
 				"confirmed": confirmed,
 			},
 		)
@@ -270,13 +273,22 @@ def _merge_checklist(doc, rows: list[dict]) -> None:
 def save_request(name: str, values: dict) -> dict:
 	"""Apply the allowed edits to a request and return the refreshed view."""
 	values = frappe.parse_json(values) or {}
+	if not isinstance(values, dict):
+		frappe.throw(_("Invalid values"), frappe.ValidationError)
 	unknown = [key for key in values if key not in ALLOWED_KEYS]
 	if unknown:
 		frappe.throw(_("These fields cannot be changed here: {0}").format(", ".join(unknown)), frappe.ValidationError)
+	for key in TABLE_KEYS:
+		if key in values:
+			rows = values[key] or []
+			if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+				frappe.throw(_("Invalid rows for {0}").format(key), frappe.ValidationError)
+			values[key] = rows
 
 	doc = frappe.get_doc(DOCTYPE, name)
 	can = _can(doc)
-	_require(can["edit"])
+	if any(key not in CHECKLIST_ONLY_KEYS for key in values):
+		_require(can["edit"])
 	for key, value in values.items():
 		if key == "checklist":
 			_require(can["manage_checklist"] or not value)
@@ -295,7 +307,8 @@ def save_request(name: str, values: dict) -> dict:
 	if "checklist" in values:
 		_merge_checklist(doc, values["checklist"] or [])
 
-	refresh_matches(doc)
+	if any(key not in CHECKLIST_ONLY_KEYS for key in values):
+		refresh_matches(doc)
 	doc.save()
 	return get_request(name)
 

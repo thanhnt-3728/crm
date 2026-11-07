@@ -21,10 +21,16 @@ EMAIL_REASON = "Email matches"
 PHONE_REASON = "Phone matches"
 CONVERTED_REASON = "Converted from lead"
 CONTACT_LISTED_REASON = "Lists confirmed contact"
+MANUAL_REASON = "Added manually"
 
 LEAD, CONTACT, DEAL = "CRM Lead", "Contact", "CRM Deal"
 
 _EMAIL_IN_TEXT = re.compile(r"[^\s,;<>\"']+@[^\s,;<>\"']+")
+
+
+def like_escape(text: str) -> str:
+	"""Escape LIKE wildcards (and the escape character) so `text` matches literally."""
+	return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _digits(column):
@@ -38,7 +44,7 @@ def _phone_rows(doctype: str, columns: list[str], phone: str) -> list[dict]:
 	if not digits:
 		return []
 	table = frappe.qb.DocType(doctype)
-	conditions = [_digits(getattr(table, column)).like(f"%{digits}%") for column in columns]
+	conditions = [_digits(getattr(table, column)).like(f"%{like_escape(digits)}%") for column in columns]
 	rows = (
 		frappe.qb.from_(table)
 		.select(table.name, *[getattr(table, column) for column in columns])
@@ -93,7 +99,7 @@ def _records_for_identifier(kind: str, value: str) -> dict[tuple[str, str], str]
 			frappe.qb.from_(child)
 			.select(child.parent, child.phone)
 			.where(child.parenttype == CONTACT)
-			.where(_digits(child.phone).like(f"%{digits}%"))
+			.where(_digits(child.phone).like(f"%{like_escape(digits)}%"))
 			.run(as_dict=True)
 		)
 		for row in rows:
@@ -184,7 +190,7 @@ def refresh_matches(request) -> None:
 	"""Pull identifiers from confirmed records, then (re)suggest matches, at most 3 rounds.
 
 	New suggestions are appended unconfirmed, unconfirmed rows that are no longer
-	suggested are dropped, confirmed rows stay. Does not save.
+	suggested are dropped, confirmed and manually added rows stay. Does not save.
 	"""
 	suggestions: list[dict] = []
 	for _round in range(MAX_ROUNDS):
@@ -196,7 +202,9 @@ def refresh_matches(request) -> None:
 
 	suggested = {(s["reference_doctype"], s["reference_name"]) for s in suggestions}
 	for row in list(request.matches):
-		if not row.confirmed and (row.reference_doctype, row.reference_name) not in suggested:
+		if row.confirmed or row.reason == MANUAL_REASON:
+			continue
+		if (row.reference_doctype, row.reference_name) not in suggested:
 			request.remove(row)
 	have = {(row.reference_doctype, row.reference_name) for row in request.matches}
 	for suggestion in suggestions:
@@ -220,7 +228,7 @@ def _count_emails(value: str) -> int:
 	rows = (
 		frappe.qb.from_(table)
 		.select(*[getattr(table, c) for c in columns])
-		.where(Criterion.any([getattr(table, c).like(f"%{value}%") for c in columns]))
+		.where(Criterion.any([getattr(table, c).like(f"%{like_escape(value)}%") for c in columns]))
 		.run(as_dict=True)
 	)
 	return sum(1 for row in rows if value in _addresses(*[row.get(c) for c in columns]))
