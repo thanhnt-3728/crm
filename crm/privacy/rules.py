@@ -1,10 +1,14 @@
 """Placeholder text and identifier scrubbing for privacy (erasure) requests."""
 
+import copy
 import re
+from collections.abc import Callable
+from email.utils import formataddr, getaddresses
+from typing import Any
 
 import phonenumbers
 
-from crm.privacy.identifiers import PHONE_REGION, normalize_identifier
+from crm.privacy.identifiers import PHONE_REGION, normalize_email, normalize_identifier
 
 
 # A confirmed email matches only as a whole address: not glued to a preceding address
@@ -60,3 +64,107 @@ def scrub_identifiers(
 		pos = end
 	out.append(text[pos:])
 	return "".join(out)
+
+
+# Deal personal field -> keys of the person's value sets it is compared against.
+DEAL_FIELD_SOURCES: dict[str, tuple[str, ...]] = {
+	"first_name": ("first_name",),
+	"last_name": ("last_name",),
+	"salutation": ("salutation",),
+	"gender": ("gender",),
+	"linkedin": ("linkedin",),
+	"twitter": ("twitter",),
+	"facebook": ("facebook",),
+	"lead_name": ("lead_name", "full_name"),
+	"job_title": ("job_title", "designation"),
+}
+
+
+def _text(value: Any) -> str:
+	return value.strip() if isinstance(value, str) else ""
+
+
+def deal_fields_to_blank(
+	deal: dict, her_values: dict[str, set[str]], emails: set[str], phones: set[str]
+) -> list[str]:
+	"""Names of the deal fields whose value belongs to the person being erased.
+
+	Name-like fields compare stripped and case-folded; email and phones are normalized.
+	Empty values are never listed.
+	"""
+	fields: list[str] = []
+
+	if _text(deal.get("email")) and normalize_identifier("Email", deal["email"]) in emails:
+		fields.append("email")
+
+	for key in ("mobile_no", "phone"):
+		if _text(deal.get(key)) and normalize_identifier("Phone", deal[key]) in phones:
+			fields.append(key)
+
+	for field, sources in DEAL_FIELD_SOURCES.items():
+		value = _text(deal.get(field)).casefold()
+		if value and any(value in her_values.get(source, ()) for source in sources):
+			fields.append(field)
+
+	return fields
+
+
+def replace_addresses(header: str | None, emails: set[str], placeholder: str) -> str:
+	"""Replace each address in `header` that is in `emails`, with its display name, by `placeholder`.
+
+	Other addresses are kept and re-joined as ", "-separated `formataddr` output.
+	"""
+	if not header:
+		return ""
+
+	parts: list[str] = []
+	for name, addr in getaddresses([header]):
+		if not name and not addr:
+			continue
+		if normalize_email(addr) in emails:
+			parts.append(placeholder)
+		else:
+			parts.append(formataddr((name, addr)))
+	return ", ".join(parts)
+
+
+def _scrub_pairs(pairs: Any, should_scrub: Callable[[str, Any], bool], placeholder: str) -> None:
+	"""Scrub `[[field, old, new], ...]` in place (on an already copied structure)."""
+	if not isinstance(pairs, list):
+		return
+	for entry in pairs:
+		if isinstance(entry, list) and len(entry) >= 3 and isinstance(entry[0], str):
+			for i in (1, 2):
+				if should_scrub(entry[0], entry[i]):
+					entry[i] = placeholder
+
+
+def scrub_version_data(data: dict, should_scrub: Callable[[str, Any], bool], placeholder: str) -> dict:
+	"""Return a copy of a Version `data` dict with the values the predicate flags replaced.
+
+	`should_scrub(field, value)` decides per value. Entries of unexpected shape are left alone.
+	"""
+	out = copy.deepcopy(data)
+	if not isinstance(out, dict):
+		return out
+
+	_scrub_pairs(out.get("changed"), should_scrub, placeholder)
+
+	for key in ("added", "removed"):
+		rows = out.get(key)
+		if not isinstance(rows, list):
+			continue
+		for entry in rows:
+			if isinstance(entry, list) and len(entry) >= 2 and isinstance(entry[1], dict):
+				row = entry[1]
+				for field in row:
+					if isinstance(field, str) and should_scrub(field, row[field]):
+						row[field] = placeholder
+
+	rows = out.get("row_changed")
+	if isinstance(rows, list):
+		for entry in rows:
+			if isinstance(entry, list) and len(entry) >= 4:
+				_scrub_pairs(entry[3], should_scrub, placeholder)
+
+	return out
