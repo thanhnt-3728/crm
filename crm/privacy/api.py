@@ -9,10 +9,10 @@ import frappe
 from frappe import _
 from frappe.utils import cint, getdate
 
+from crm.privacy import lifecycle
 from crm.privacy.deadlines import days_left
 from crm.privacy.hold import apply_hold
 from crm.privacy.identifiers import normalize_identifier
-from crm.privacy.lifecycle import close
 from crm.privacy.matching import (
 	MANUAL_REASON,
 	contact_identifiers,
@@ -413,7 +413,7 @@ def decline_request(name: str, reason: str) -> dict:
 
 
 @frappe.whitelist()
-def close_request(name: str, date_answered: str, outcome: str, denial_reason: str | None = None) -> dict:
+def close_request(name: str, date_answered: str | None, outcome: str, denial_reason: str | None = None) -> dict:
 	"""Close an erased or declined request and wipe what is left of the person on it.
 
 	There is no undo: the identifiers, matches and free text are removed.
@@ -434,6 +434,9 @@ def close_request(name: str, date_answered: str, outcome: str, denial_reason: st
 	if any(not row.done for row in doc.checklist):
 		frappe.throw(_("Finish every checklist item before closing"), frappe.ValidationError)
 
+	# getdate() turns an empty value into today, so a blank date is refused first.
+	if not str(date_answered or "").strip():
+		frappe.throw(_("Enter the date the requester was answered"), frappe.ValidationError)
 	try:
 		answered = getdate(date_answered)
 	except Exception:
@@ -454,5 +457,5 @@ def close_request(name: str, date_answered: str, outcome: str, denial_reason: st
 		},
 		update_modified=False,
 	)
-	close(doc)
+	lifecycle.close(doc)
 	return get_request(name)

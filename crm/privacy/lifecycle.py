@@ -18,7 +18,13 @@ IDENTIFIER = "CRM Erasure Identifier"
 MATCH = "CRM Erasure Match"
 RETENTION_MONTHS = 24
 
-CLEARED_FIELDS = ("requester_name", "other_names", "original_message", "contract_references")
+CLEARED_FIELDS = (
+	"requester_name",
+	"other_names",
+	"original_message",
+	"contract_references",
+	"decline_reason",
+)
 
 
 def _request_communications(request: str) -> list[str]:
@@ -80,4 +86,21 @@ def purge_expired(today=None) -> None:
 
 
 def _delete(doctype: str, name: str) -> None:
-	frappe.delete_doc(doctype, name, ignore_permissions=True, delete_permanently=True, force=True)
+	"""Delete one row. A failure is logged (by name only) and skipped, so one bad row
+	does not stop the daily job."""
+	savepoint = "erasure_purge"
+	frappe.db.savepoint(savepoint)
+	try:
+		frappe.delete_doc(doctype, name, ignore_permissions=True, delete_permanently=True, force=True)
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		# An explicit message keeps the traceback (and its local variables, which can hold a
+		# retained contract's name) out of the Error Log.
+		frappe.log_error(
+			title=f"Erasure purge failed for {name}",
+			message="The record could not be deleted. It stays until the next daily run.",
+			reference_doctype=doctype,
+			reference_name=name,
+		)
+	else:
+		frappe.db.release_savepoint(savepoint)

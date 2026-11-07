@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, getdate, today
@@ -113,6 +115,37 @@ class TestLifecycle(IntegrationTestCase):
 			frappe.db.get_value(DOCTYPE, r.name, ["status", "outcome", "denial_reason"]),
 			("Closed", "Denied", "Identity not verifiable"),
 		)
+		# The free-text decline reason may name the requester, so it does not outlive the close.
+		self.assertFalse(frappe.db.get_value(DOCTYPE, r.name, "decline_reason"))
+
+	def test_blank_date_answered_is_refused(self):
+		officer = make_compliance_user()
+		r = make_request()
+		self._status(r.name, "Erased")
+		frappe.set_user(officer)
+		for blank in ("", "  ", None):
+			with self.assertRaises(frappe.ValidationError):
+				close_request(r.name, blank, "Completed")
+		self.assertEqual(frappe.db.get_value(DOCTYPE, r.name, "status"), "Erased")
+
+	def test_purge_skips_a_failing_record_and_goes_on(self):
+		bad = make_request(date_received="2024-01-02")
+		good = make_request(date_received="2024-01-03")
+		for r in (bad, good):
+			frappe.db.set_value(DOCTYPE, r.name, {"status": "Closed", "date_answered": "2024-01-10"})
+		real = frappe.delete_doc
+
+		def flaky(doctype, name, *args, **kwargs):
+			if name == bad.name:
+				raise RuntimeError("boom")
+			return real(doctype, name, *args, **kwargs)
+
+		with patch("frappe.delete_doc", side_effect=flaky), patch("frappe.log_error") as log_error:
+			purge_expired(getdate("2026-11-07"))
+		self.assertTrue(frappe.db.exists(DOCTYPE, bad.name))
+		self.assertFalse(frappe.db.exists(DOCTYPE, good.name))
+		log_error.assert_called_once()
+		self.assertEqual(log_error.call_args.kwargs["title"], f"Erasure purge failed for {bad.name}")
 
 	def test_close_date_checks_and_role(self):
 		officer = make_compliance_user()
