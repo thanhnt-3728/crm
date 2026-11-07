@@ -34,6 +34,20 @@ class TestPrivacySettings(IntegrationTestCase):
 		self.assertEqual(get_secret(), get_secret())
 		self.assertEqual(len(get_secret()), 64)
 
+	def test_saving_settings_keeps_secret(self):
+		s = get_secret()
+		settings = frappe.get_single("CRM Privacy Settings")
+		settings.contract_retention_months = 12
+		settings.save(ignore_permissions=True)
+		self.assertEqual(get_secret(), s)
+
+	def test_do_not_contact_survives_settings_save(self):
+		add_do_not_contact("Email", "marisol@example.com", "PDR-0004")
+		settings = frappe.get_single("CRM Privacy Settings")
+		settings.contract_retention_months = 12
+		settings.save(ignore_permissions=True)
+		self.assertTrue(is_blocked("Email", "marisol@example.com"))
+
 	def test_do_not_contact_roundtrip_any_format(self):
 		add_do_not_contact("Phone", "(530) 555-0142", "PDR-0001")
 		add_do_not_contact("Phone", "530.555.0142", "PDR-0001")

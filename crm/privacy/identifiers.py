@@ -32,14 +32,28 @@ def hash_identifier(kind: str, normalized: str, secret: str) -> str:
 	return hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 
-def get_secret() -> str:
-	"""The HMAC key for identifier hashes, generated on first use and stored encrypted."""
-	secret = get_decrypted_password(SETTINGS, SETTINGS, "identifier_secret", raise_exception=False)
+def _read_secret() -> str | None:
+	return get_decrypted_password(SETTINGS, SETTINGS, "identifier_secret", raise_exception=False)
+
+
+def ensure_secret() -> str:
+	"""Create the identifier-hash key once and return it.
+
+	The key lives only in `__Auth` (encrypted), deliberately with no docfield on the
+	settings doctype, so saving the settings can never overwrite or clear it. Called
+	from install/migrate so the key exists before any request needs it.
+	"""
+	secret = _read_secret()
 	if secret:
 		return secret
 	secret = secrets.token_hex(32)
 	set_encrypted_password(SETTINGS, SETTINGS, secret, "identifier_secret")
 	return secret
+
+
+def get_secret() -> str:
+	"""The HMAC key for identifier hashes. Falls back to creating it if migrate did not."""
+	return _read_secret() or ensure_secret()
 
 
 def personal_fields() -> dict[str, set[str]]:

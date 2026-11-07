@@ -2,6 +2,7 @@
 
 import frappe
 
+from crm.privacy.identifiers import ensure_secret
 from crm.privacy.rules import DEFAULT_PERSONAL_FIELDS
 
 COMPLIANCE_ROLE = "Compliance"
@@ -9,6 +10,7 @@ COMPLIANCE_ROLE = "Compliance"
 
 def after_migrate() -> None:
 	ensure_compliance_role()
+	ensure_secret()
 	seed_personal_fields()
 
 

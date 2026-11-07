@@ -6,7 +6,6 @@
  "field_order": [
   "head_of_compliance",
   "contract_retention_months",
-  "identifier_secret",
   "section_personal_fields",
   "personal_fields"
  ],
@@ -24,13 +23,6 @@
    "fieldname": "contract_retention_months",
    "fieldtype": "Int",
    "label": "Contract Retention (Months)"
-  },
-  {
-   "fieldname": "identifier_secret",
-   "fieldtype": "Password",
-   "hidden": 1,
-   "label": "Identifier Secret",
-   "read_only": 1
   },
   {
    "fieldname": "section_personal_fields",
@@ -65,13 +57,8 @@
    "write": 1
   },
   {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "print": 1,
    "read": 1,
    "role": "Compliance",
-   "share": 1,
    "write": 1
   }
  ],

@@ -18,7 +18,6 @@ class CRMPrivacySettings(Document):
 
 		contract_retention_months: DF.Int
 		head_of_compliance: DF.Link | None
-		identifier_secret: DF.Password | None
 		personal_fields: DF.Table[CRMPersonalField]
 	# end: auto-generated types
 
