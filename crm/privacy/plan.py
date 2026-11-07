@@ -4,7 +4,7 @@
 `preview(plan)`. Error text here never carries the person's name, email or phone.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from email.utils import getaddresses
 
 import frappe
@@ -73,6 +73,8 @@ class ErasurePlan:
 	files: list[str]  # File names
 	has_recordings: bool
 	her_values: dict[str, set[str]]  # case-folded name/title/social values from confirmed leads+contacts
+	# Set by erase_records before renaming: {"Contact": [...], "Address": [...]} as they were named.
+	former_names: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _unique(names) -> list[str]:

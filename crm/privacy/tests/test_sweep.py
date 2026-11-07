@@ -536,4 +536,4 @@ class TestSweep(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Communication", c, "subject"), "Quote")
 
 	def test_sweep_is_in_the_erasure_steps(self):
-		self.assertEqual(erasure.STEPS, [erasure.erase_records, sweep_activities])
+		self.assertEqual(erasure.STEPS[:2], [erasure.erase_records, sweep_activities])

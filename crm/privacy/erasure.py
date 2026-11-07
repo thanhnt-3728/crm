@@ -26,6 +26,7 @@ from frappe.model.document import Document
 from frappe.model.rename_doc import rename_doc
 from frappe.utils import now
 
+from crm.privacy.history import finish
 from crm.privacy.identifiers import normalize_identifier, personal_fields
 from crm.privacy.matching import like_escape, phone_rows
 from crm.privacy.plan import ErasurePlan, plan_erasure
@@ -386,7 +387,7 @@ def erase_records(plan: ErasurePlan, doc: Document, after_commit: list[Callable]
 
 	Contacts and addresses are renamed to the placeholder (their names are her name).
 	`plan.contacts` and `plan.addresses` are updated to the new names, so later steps
-	find the renamed records.
+	find the renamed records; `plan.former_names` keeps the old ones.
 	"""
 	placeholder = erased_person(doc.name)
 	listed = personal_fields()
@@ -398,9 +399,11 @@ def erase_records(plan: ErasurePlan, doc: Document, after_commit: list[Callable]
 	_erase_contacts(plan, listed, placeholder)
 	_erase_addresses(plan, placeholder)
 
+	# History and deleted copies outside the renamed rows still carry the old names.
+	plan.former_names = {CONTACT: list(plan.contacts), ADDRESS: list(plan.addresses)}
 	plan.contacts[:] = _rename_all(CONTACT, plan.contacts, placeholder, after_commit)
 	plan.addresses[:] = _rename_all(ADDRESS, plan.addresses, placeholder, after_commit)
 	_erase_link_titles(plan, placeholder)
 
 
-STEPS: list[Callable[[ErasurePlan, Document, list[Callable]], None]] = [erase_records, sweep_activities]
+STEPS: list[Callable[[ErasurePlan, Document, list[Callable]], None]] = [erase_records, sweep_activities, finish]
