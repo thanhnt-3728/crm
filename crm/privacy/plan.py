@@ -25,6 +25,7 @@ from crm.privacy.matching import (
 
 DOCTYPE = "CRM Erasure Request"
 EMAIL_COLUMNS = ("sender", "recipients", "cc", "bcc")
+RECORDINGS_ITEM = "Delete recordings at provider (Twilio)"
 
 # What her_values reads from a confirmed lead and contact. Keys line up with
 # rules.DEAL_FIELD_SOURCES, which compares deal fields against them.
@@ -168,7 +169,7 @@ def _deals_split(
 	return [d for d in deals if d in on], [d for d in deals if d not in on]
 
 
-def _addresses(contacts: list[str]) -> list[str]:
+def _contact_addresses(contacts: list[str]) -> list[str]:
 	if not contacts:
 		return []
 	found = _parents_linked("Address", "Dynamic Link", "link_doctype", "link_name", {CONTACT: contacts})
@@ -217,7 +218,14 @@ def plan_erasure(request) -> ErasurePlan:
 		if image
 	]
 	if images:
-		files += frappe.get_all("File", filters={"file_url": ["in", _unique(images)]}, pluck="name")
+		# Stored files are shared by content hash, so a File with her image URL may belong to
+		# another record (an organization logo, a stock avatar). Only unattached ones are hers;
+		# those attached to her leads and contacts are already in `files` above.
+		files += frappe.get_all(
+			"File",
+			filters={"file_url": ["in", _unique(images)], "attached_to_doctype": ["is", "not set"]},
+			pluck="name",
+		)
 
 	return ErasurePlan(
 		request=doc.name,
@@ -227,7 +235,7 @@ def plan_erasure(request) -> ErasurePlan:
 		contacts=contacts,
 		deals_on=deals_on,
 		deals_removed=deals_removed,
-		addresses=_addresses(contacts),
+		addresses=_contact_addresses(contacts),
 		communications=communications,
 		call_logs=call_logs,
 		notes=_unique(notes),
@@ -309,13 +317,17 @@ def preview(plan: ErasurePlan) -> dict:
 	if frappe.db.get_value(DOCTYPE, plan.request, "contract_references"):
 		keep.append({"label": "Retained-contract entry", "links": []})
 
-	open_checklist = frappe.get_all(
+	items = frappe.get_all(
 		"CRM Erasure Checklist Item",
-		filters={"parent": plan.request, "parenttype": DOCTYPE, "done": 0},
-		pluck="description",
+		filters={"parent": plan.request, "parenttype": DOCTYPE},
+		fields=["description", "done"],
 		order_by="idx asc",
 		parent_doctype=DOCTYPE,
 	)
+	open_checklist = [item.description for item in items if not item.done]
+	# The erasure adds this item when recordings exist, so show it before approval.
+	if plan.has_recordings and RECORDINGS_ITEM not in [item.description for item in items]:
+		open_checklist.append(RECORDINGS_ITEM)
 	return {
 		"remove": remove,
 		"keep": keep,

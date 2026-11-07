@@ -218,10 +218,20 @@ class TestPlan(IntegrationTestCase):
 		comm = make_communication(sender=EMAIL)
 		on_comm = _file("Communication", comm, "mail.txt")
 		frappe.db.set_value("Contact", self.m.contact, "image", "/files/photo.png")
-		photo = _file("User", "Administrator", "photo.png", file_url="/files/photo.png", is_private=0)
 		p = plan_erasure(self.r)
-		self.assertTrue({on_lead, on_comm, photo} <= set(p.files))
+		self.assertTrue({on_lead, on_comm} <= set(p.files))
 		self.assertNotIn(on_removed, p.files)
+
+	def test_image_url_files_only_when_unattached_or_hers(self):
+		frappe.db.set_value("Contact", self.m.contact, "image", "/files/photo.png")
+		shared = {"file_url": "/files/photo.png", "is_private": 0}
+		unattached = _file("", "", "photo.png", **shared)
+		on_contact = _file("Contact", self.m.contact, "photo.png", **shared)
+		on_user = _file("User", "Administrator", "photo.png", **shared)
+		on_org = _file("CRM Organization", self.m.org, "photo.png", **shared)
+		p = plan_erasure(self.r)
+		self.assertTrue({unattached, on_contact} <= set(p.files))
+		self.assertFalse({on_user, on_org} & set(p.files))
 
 	def test_preview_flags_unlisted_custom_field(self):
 		doc = frappe.get_doc(
@@ -274,6 +284,17 @@ class TestPlan(IntegrationTestCase):
 		):
 			self.assertIn(label, keep)
 		self.assertEqual(out["warnings"]["open_checklist"], ["Delete the export"])
+
+	def test_preview_lists_recordings_item_until_it_exists(self):
+		item = "Delete recordings at provider (Twilio)"
+		make_call_log(**{"from": "530.555.0142", "recording_url": "https://api.twilio.com/r/1"})
+		self.assertEqual(preview(plan_erasure(self.r))["warnings"]["open_checklist"], [item])
+		self.r.append("checklist", {"description": item})
+		self.r.save()
+		self.assertEqual(preview(plan_erasure(self.r))["warnings"]["open_checklist"], [item])
+		self.r.checklist[0].done = 1
+		self.r.save()
+		self.assertEqual(preview(plan_erasure(self.r))["warnings"]["open_checklist"], [])
 
 	def test_preview_omits_retained_contract_without_references(self):
 		out = preview(plan_erasure(self.r))
