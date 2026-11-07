@@ -339,8 +339,9 @@ def _rename(doctype: str, old: str, new: str, after_commit: list[Callable]) -> N
 
 	rename_doc moves Link and Dynamic Link values, child rows, attachments, Version rows
 	and user settings to the new name. It also adds an Edit comment "renamed from <old>",
-	which is deleted here. It does not update Notification Log `document_name` (a Data
-	field) or the global search index, so those are handled here too.
+	which is deleted here. It does not update Notification Log `document_name` or Email
+	Queue `reference_name` (Data fields) or the global search index, so those are handled
+	here too.
 	"""
 	existing = set(_edit_comments(doctype, old))
 	# The job has already checked the approver; rebuild_search would enqueue a job before the commit.
@@ -356,13 +357,18 @@ def _rename(doctype: str, old: str, new: str, after_commit: list[Callable]) -> N
 	added = [name for name in _edit_comments(doctype, new) if name not in existing]
 	if added:
 		frappe.db.delete("Comment", {"name": ["in", added]})
-	frappe.db.set_value(
-		"Notification Log",
-		{"document_type": doctype, "document_name": old},
-		"document_name",
-		new,
-		update_modified=False,
-	)
+	# Data fields that hold the record's name, which rename_doc leaves on the old name.
+	for table, doctype_field, name_field in (
+		("Notification Log", "document_type", "document_name"),
+		("Email Queue", "reference_doctype", "reference_name"),
+	):
+		frappe.db.set_value(
+			table,
+			{doctype_field: doctype, name_field: old},
+			name_field,
+			new,
+			update_modified=False,
+		)
 	# __global_search is MyISAM, outside the transaction, so it changes only after the commit.
 	after_commit.append(partial(_replace_search_entry, doctype, old, new))
 

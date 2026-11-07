@@ -228,13 +228,116 @@ class TestSweep(IntegrationTestCase):
 		)
 		self.assertTrue(notification)
 		self.assertTrue(queued)
+		self.assertEqual(
+			set(frappe.get_all("Email Queue", {"name": ["in", queued]}, pluck="status")), {"Not Sent"}
+		)
 		run_erasure(self.name, self.officer)
 		row = frappe.db.get_value("CRM Notification", notification, ["message", "notification_text"], as_dict=True)
 		self.assertEqual((row.message, row.notification_text), (self.C, self.C))
-		for name in queued:
-			self.assertEqual(frappe.db.get_value("Email Queue", name, "message"), self.C)
-		recipients = frappe.get_all("Email Queue Recipient", {"parent": ["in", queued]}, pluck="recipient")
-		self.assertEqual(set(recipients), {self.officer})  # a colleague's address is kept
+		# Not sent yet: deleted with its recipients rather than sent as a bare placeholder.
+		self.assertFalse(frappe.db.exists("Email Queue", {"name": ["in", queued]}))
+		self.assertFalse(frappe.db.exists("Email Queue Recipient", {"parent": ["in", queued]}))
+
+	def test_pending_queued_email_deleted_sent_one_wiped(self):
+		def queue(status: str, recipient_status: str):
+			return _raw(
+				{
+					"doctype": "Email Queue",
+					"sender": "tyler@northpine.example",
+					"message": "Subject: Your quote\n\nHi Marisol",
+					"status": status,
+					"reference_doctype": "CRM Lead",
+					"reference_name": self.m.lead,
+					"recipients": [
+						{"recipient": MARISOL_EMAIL, "status": recipient_status},
+						{"recipient": "dana@northpine.example", "status": recipient_status},
+					],
+				}
+			).name
+
+		pending, partly, sent = queue("Not Sent", "Not Sent"), queue("Partially Sent", "Sent"), queue("Sent", "Sent")
+		other = queue("Not Sent", "Not Sent")
+		frappe.db.set_value("Email Queue", other, {"reference_doctype": "CRM Organization", "reference_name": self.m.org})
+		frappe.db.set_value("Email Queue", other, "message", "Subject: Org\n\nHi Dana")
+		frappe.db.delete("Email Queue Recipient", {"parent": other, "recipient": MARISOL_EMAIL})
+		run_erasure(self.name, self.officer)
+		for name in (pending, partly):
+			self.assertFalse(frappe.db.exists("Email Queue", name))
+			self.assertFalse(frappe.db.exists("Email Queue Recipient", {"parent": name}))
+		self.assertEqual(frappe.db.get_value("Email Queue", sent, ["message", "status"]), (self.C, "Sent"))
+		recipients = frappe.get_all(
+			"Email Queue Recipient", {"parent": sent}, pluck="recipient", parent_doctype="Email Queue"
+		)
+		self.assertEqual(sorted(recipients), sorted([self.P, "dana@northpine.example"]))
+		self.assertEqual(frappe.db.get_value("Email Queue", other, "message"), "Subject: Org\n\nHi Dana")
+
+	def test_queued_email_on_old_contact_name_follows_rename(self):
+		sent = _raw(
+			{
+				"doctype": "Email Queue",
+				"sender": "tyler@northpine.example",
+				"message": "Subject: Hello\n\nHi",
+				"status": "Sent",
+				"reference_doctype": "Contact",
+				"reference_name": self.m.contact,
+			}
+		).name
+		run_erasure(self.name, self.officer)
+		self.assertEqual(
+			frappe.db.get_value("Email Queue", sent, ["reference_name", "message"]), (self.P, self.C)
+		)
+
+	def test_wiped_email_leaves_global_search_after_commit(self):
+		from frappe.utils.global_search import sync_value
+
+		c = make_communication(
+			sender=MARISOL_EMAIL, recipients="tyler@northpine.example", subject="Quote", sent_or_received="Received"
+		)
+		values = {"doctype": "Communication", "name": c, "published": 0, "title": "Quote", "route": ""}
+		# __global_search is MyISAM, outside the test transaction: clean up by hand.
+		sync_value({**values, "content": f"Subject: Quote ||| Sender: {MARISOL_EMAIL}"})
+		try:
+			run_erasure(self.name, self.officer)
+			self.assertTrue(frappe.db.exists("__global_search", {"doctype": "Communication", "name": c}))
+			frappe.db.after_commit.run()
+			self.assertFalse(frappe.db.exists("__global_search", {"doctype": "Communication", "name": c}))
+			self.assertFalse(frappe.db.exists("__global_search", {"content": ["like", "%sierrafoothills%"]}))
+		finally:
+			frappe.db.delete("__global_search", {"doctype": "Communication", "name": c})
+
+	def test_whatsapp_logs_with_her_number_or_email(self):
+		if not frappe.db.table_exists("WA Log"):
+			self.skipTest("whatsapp is not installed")
+		payload = {"entry": [{"changes": [{"value": {"contacts": [{"wa_id": "15305550142", "profile": {"name": "Marisol"}}]}}]}]}
+		hers = _raw(
+			{
+				"doctype": "WA Log",
+				"level": "Info",
+				"event_type": "Webhook",
+				"message": "Incoming text message from 15305550142 (Marisol)",
+				"request_data": json.dumps(payload),
+			}
+		)
+		by_email = _raw(
+			{"doctype": "WA Log", "level": "Info", "event_type": "API", "message": f"Sent to {MARISOL_EMAIL}"}
+		)
+		other_payload = json.dumps({"contacts": [{"wa_id": "15550001111", "profile": {"name": "Dana"}}]})
+		other = _raw(
+			{
+				"doctype": "WA Log",
+				"level": "Info",
+				"event_type": "Webhook",
+				"message": "Incoming text message from 15550001111 (Dana)",
+				"request_data": other_payload,
+			}
+		)
+		run_erasure(self.name, self.officer)
+		self.assertEqual(frappe.db.get_value("WA Log", hers.name, ["request_data", "message"]), ("{}", self.C))
+		self.assertEqual(frappe.db.get_value("WA Log", by_email.name, "message"), self.C)
+		self.assertEqual(
+			frappe.db.get_value("WA Log", other.name, ["request_data", "message"]),
+			(other_payload, "Incoming text message from 15550001111 (Dana)"),
+		)
 
 	def test_side_tables(self):
 		# CRM Notification about something else that quotes her email: only the address goes.
@@ -365,7 +468,15 @@ class TestSweep(IntegrationTestCase):
 			{"doctype": "WA Profile", "phone_number": "+15305550142", "profile_name": "Marisol", "wa_id": "15305550142"}
 		)
 		other = _raw({"doctype": "WA Profile", "phone_number": "+15550001111", "profile_name": "Dana"})
-		to_her = _raw({"doctype": "WA Message", "to": hers.name, "direction": "Incoming", "message": "Hi it's Marisol"})
+		to_her = _raw(
+			{
+				"doctype": "WA Message",
+				"to": hers.name,
+				"direction": "Incoming",
+				"message": "Hi it's Marisol",
+				"media_url": "Marisol_Vega_ID.pdf",
+			}
+		)
 		on_lead = _raw(
 			{
 				"doctype": "WA Message",
@@ -382,7 +493,7 @@ class TestSweep(IntegrationTestCase):
 			frappe.db.get_value("WA Profile", hers.name, ["phone_number", "profile_name", "wa_id"]), (self.P,) * 3
 		)
 		self.assertEqual(frappe.db.get_value("WA Profile", other.name, "phone_number"), "+15550001111")
-		self.assertEqual(frappe.db.get_value("WA Message", to_her.name, "message"), self.C)
+		self.assertEqual(frappe.db.get_value("WA Message", to_her.name, ["message", "media_url"]), (self.C, ""))
 		self.assertEqual(frappe.db.get_value("WA Message", on_lead.name, "message"), self.C)
 		self.assertEqual(frappe.db.get_value("WA Message", unrelated.name, "message"), "Hi Dana")
 

@@ -33,6 +33,9 @@ DOCTYPE = "CRM Erasure Request"
 CHECKLIST_ITEM = "CRM Erasure Checklist Item"
 LEAD, DEAL, CONTACT = "CRM Lead", "CRM Deal", "Contact"
 ADDRESS_HEADERS = ("sender", "recipients", "cc", "bcc")
+PENDING_EMAIL = ("Not Sent", "Partially Sent")  # EmailQueue.is_to_be_sent
+# Activities whose rows feed Frappe's global search (fields marked in_global_search).
+GLOBAL_SEARCH_DOCTYPES = ("Communication", "FCRM Note", "CRM Task", "CRM Call Log")
 _SEPARATORS = re.compile(r"[\s\-().+]")
 
 Targets = dict[str, list[str]]
@@ -147,6 +150,23 @@ def _reindex(doctype: str, name: str) -> None:
 def _queue_reindex(after_commit: list[Callable], doctype: str, names) -> None:
 	for name in dict.fromkeys(names):
 		after_commit.append(partial(_reindex, doctype, name))
+
+
+def _drop_global_search(doctype: str, names: list[str]) -> None:
+	"""After the commit: remove the rows' global search entries (subject, sender…).
+
+	set_value does not refresh `__global_search`, and it is MyISAM, outside the
+	transaction, so this runs only once the erasure has committed.
+	"""
+	for start in range(0, len(names), 500):
+		frappe.db.delete("__global_search", {"doctype": doctype, "name": ["in", names[start : start + 500]]})
+
+
+def _queue_global_search_removal(after_commit: list[Callable], activities: dict[str, list[str]]) -> None:
+	for doctype in GLOBAL_SEARCH_DOCTYPES:
+		names = list(dict.fromkeys(activities.get(doctype) or []))
+		if names and frappe.get_meta(doctype).get_global_search_fields():
+			after_commit.append(partial(_drop_global_search, doctype, names))
 
 
 # --- communications -----------------------------------------------------------------------
@@ -397,7 +417,17 @@ def _sweep_email_queue(plan: ErasurePlan, targets: Targets, content: str, person
 	for name in _mentioning("Email Queue", ("message",), plan.emails, plan.phones) - queued:
 		if _holds_identifier(frappe.db.get_value("Email Queue", name, "message"), plan):
 			queued.add(name)
-	_wipe("Email Queue", queued, ("message",), content)
+	# Still waiting to go out: a wiped message would be sent as a bare placeholder, so the
+	# whole queued email goes. Rows already sent are kept as a record, with the message wiped.
+	pending = (
+		set(frappe.get_all("Email Queue", {"name": ["in", list(queued)], "status": ["in", PENDING_EMAIL]}, pluck="name"))
+		if queued
+		else set()
+	)
+	if pending:
+		frappe.db.delete("Email Queue Recipient", {"parenttype": "Email Queue", "parent": ["in", list(pending)]})
+		frappe.db.delete("Email Queue", {"name": ["in", list(pending)]})
+	_wipe("Email Queue", queued - pending, ("message",), content)
 
 	cc = _mentioning("Email Queue", ("show_as_cc",), plan.emails, set())
 	for name in cc:
@@ -421,10 +451,31 @@ def _sweep_whatsapp(plan: ErasurePlan, records: Targets, content: str, person: s
 	if profiles:
 		messages |= set(frappe.get_all("WA Message", {"to": ["in", profiles]}, pluck="name"))
 	_wipe("WA Message", messages, ("message",), content)
-	_wipe("WA Message", messages, ("template_body_parameters", "template_header_parameters"), "")
+	# media_url holds the incoming document's file name
+	_wipe("WA Message", messages, ("template_body_parameters", "template_header_parameters", "media_url"), "")
 	_sweep_text("WA Message", ("error_message",), set(), messages, plan, content, person)
 
 	_wipe("WA Profile", profiles, ("phone_number", "profile_name", "wa_id"), person)
+	_sweep_wa_logs(plan, content)
+
+
+def _sweep_wa_logs(plan: ErasurePlan, content: str) -> None:
+	"""Webhook and API logs holding her number or email: the payloads go, the message becomes C.
+
+	Each webhook call logs its full payload (her wa_id, profile name and message text).
+	"""
+	doctype = "WA Log"
+	if not _exists(doctype):
+		return
+	fields = _fields(doctype, ("request_data", "response_data", "message"))
+	for name in _mentioning(doctype, fields, plan.emails, plan.phones):
+		row = frappe.db.get_value(doctype, name, fields, as_dict=True) or {}
+		if not any(_holds_identifier(row.get(field), plan) for field in fields):
+			continue
+		values = {field: "{}" for field in ("request_data", "response_data") if row.get(field)}
+		if row.get("message"):
+			values["message"] = content
+		_set(doctype, name, values)
 
 
 def _sweep_event_participants(plan: ErasurePlan, person: str) -> None:
@@ -519,6 +570,7 @@ def sweep_activities(plan: ErasurePlan, doc: Document, after_commit: list[Callab
 		"CRM Task": plan.tasks,
 		"Comment": plan.comments,
 	}
+	_queue_global_search_removal(after_commit, targets)
 	_sweep_notifications(plan, targets, content, person)
 	_sweep_notification_logs(plan, targets, content, person)
 	_sweep_todos(plan, targets, content, person)
