@@ -257,7 +257,8 @@ if int(frappe.__version__.split(".")[0]) < 16:
 
 doc_events = {
 	"Contact": {
-		"validate": ["crm.api.contact.validate", "crm.privacy.blocking.check_doc"],
+		# the block runs first: contact.validate writes linked deals before it could throw
+		"validate": ["crm.privacy.blocking.check_doc", "crm.api.contact.validate"],
 	},
 	"Notification Log": {
 		"before_insert": ["crm.extends.notification_log.before_insert"],
