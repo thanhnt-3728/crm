@@ -5,6 +5,8 @@ from frappe.exceptions import ValidationError
 from frappe.integrations.utils import make_get_request
 from frappe.utils import get_datetime, get_system_timezone, now_datetime
 
+from crm.privacy.do_not_contact import PrivacySettingsIncompleteError, skip_blocked
+
 FB_GRAPH_API_BASE = "https://graph.facebook.com"
 FB_GRAPH_API_VERSION = "v23.0"
 # Meta compares whole seconds and its clock is not ours, so each run re-reads a few
@@ -23,6 +25,12 @@ def get_fb_graph_api_url(endpoint: str) -> str:
 	return f"{FB_GRAPH_API_BASE}/{FB_GRAPH_API_VERSION}/{endpoint}"
 
 
+SECRET_MISSING_NOTE = (
+	"Not imported: the privacy settings are incomplete (the do-not-contact secret is missing). "
+	"Restore it in Privacy settings, then retry. Only the Meta lead id is kept here."
+)
+
+
 class FacebookSyncSource:
 	def __init__(
 		self,
@@ -34,6 +42,7 @@ class FacebookSyncSource:
 		self.form_id = form_id
 		self.source_name = source_name
 		self.form_questions_mapping = None
+		self.skipped = 0  # leads left out because the person asked to be erased
 
 	def get_api_url(self, endpoint: str) -> str:
 		return get_fb_graph_api_url(endpoint)
@@ -50,6 +59,8 @@ class FacebookSyncSource:
 		if frappe.db.exists("CRM Lead", {"facebook_lead_id": lead["id"]}):
 			return
 
+		if "field_data" not in lead:  # a log kept while the privacy secret was missing holds the id only
+			lead = self.fetch_lead(lead["id"])
 		question_to_field_map = self.get_form_questions_mapping()
 		# Meta sends some fields, like inbox_url, without any values
 		lead_data = {item["name"]: item["values"][0] for item in lead["field_data"] if item.get("values")}
@@ -62,12 +73,24 @@ class FacebookSyncSource:
 
 		try:
 			self.validate_duplicate_lead(crm_lead_data, question_to_field_map)
-			return frappe.get_doc(
-				{
-					"doctype": "CRM Lead",
-					**crm_lead_data,
-				}
-			).insert(ignore_permissions=True)
+			# A lead of a person who asked to be erased is skipped without a Failed Lead Sync Log, which
+			# would keep her payload
+			with skip_blocked("Facebook lead sync") as skip:
+				doc = frappe.get_doc({"doctype": "CRM Lead", **crm_lead_data}).insert(ignore_permissions=True)
+			if (
+				skip.secret_missing
+			):  # nobody can say whether this person asked to be erased: do not lose the lead
+				raise PrivacySettingsIncompleteError(
+					frappe._("Privacy settings are incomplete. Ask your administrator.")
+				)
+			if skip.skipped:
+				self.skipped += 1
+				return None
+			return doc
+		except PrivacySettingsIncompleteError:
+			if raise_exception:
+				raise
+			self.hold_for_retry(lead["id"])
 		except (frappe.UniqueValidationError, DuplicateLeadError):
 			self.create_failure_log(lead, "Duplicate")
 			if raise_exception:
@@ -76,6 +99,20 @@ class FacebookSyncSource:
 			self.create_failure_log(lead, traceback=frappe.get_traceback(with_context=True))
 			if raise_exception:
 				raise
+
+	def hold_for_retry(self, lead_id: str) -> None:
+		"""A Failed Lead Sync Log with the lead id and a fixed note, no payload, so no personal data is kept
+		for someone who may have asked to be erased. One per lead: the sync re-reads the last few minutes."""
+		held = {"id": lead_id}
+		known = {"source": self.get_source_name(), "type": "Failure", "lead_data": frappe.as_json(held)}
+		if not frappe.db.exists("Failed Lead Sync Log", known):
+			self.create_failure_log(held, traceback=SECRET_MISSING_NOTE)
+
+	def fetch_lead(self, lead_id: str) -> dict:
+		return make_get_request(
+			self.get_api_url(f"/{lead_id}"),
+			params={"access_token": self.access_token, "fields": "id,created_time,field_data"},
+		)
 
 	def fetch_leads(self):
 		url = self.get_api_url(f"/{self.form_id}/leads")

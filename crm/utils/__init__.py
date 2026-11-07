@@ -345,6 +345,12 @@ def update_modified_background(doctype: str, docname: str):
 
 
 def on_communication_insert(doc: Communication, method: str | None = None):
+	# Imported here: crm.privacy imports crm.utils. Mail from a person with an erasure request was already
+	# attached to it (or to nothing) in the before_insert hook, and must start no lead.
+	from crm.privacy.inbound_email import finish_routing
+
+	if finish_routing(doc):
+		return
 	create_lead_from_incoming_email(doc)
 
 

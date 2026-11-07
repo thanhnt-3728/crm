@@ -1,0 +1,57 @@
+{
+ "actions": [],
+ "autoname": "field:identifier_hash",
+ "creation": "2026-11-07 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "kind",
+  "identifier_hash",
+  "created_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Kind",
+   "options": "Email\nPhone",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Keyed one-way hash of the erased email or phone, also the name of the row. The value itself is never stored.",
+   "fieldname": "identifier_hash",
+   "fieldtype": "Data",
+   "label": "Identifier Hash",
+   "read_only": 1,
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "created_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Created On",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Do Not Contact",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "Compliance"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

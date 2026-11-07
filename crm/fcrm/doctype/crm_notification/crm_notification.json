@@ -34,7 +34,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Type",
-   "options": "Mention\nTask\nAssignment\nWhatsApp\nAutomation",
+   "options": "Mention\nTask\nAssignment\nWhatsApp\nAutomation\nCompliance",
    "reqd": 1
   },
   {
