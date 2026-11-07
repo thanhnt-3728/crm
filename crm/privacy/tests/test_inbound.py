@@ -55,7 +55,6 @@ class TestInbound(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("Communication", c))
 		self.assertIsNone(frappe.db.get_value("Communication", c, "reference_name"))
 		self.assertFalse(frappe.db.exists("CRM Lead", {"email": "marisol@sierrafoothills.example"}))
-		frappe.db.after_commit.run()
 		self.assertTrue(frappe.db.exists("CRM Notification", {"to_user": officer, "reference_name": c}))
 
 	def _receive(self, **account_fields) -> str:
@@ -107,7 +106,6 @@ class TestInbound(IntegrationTestCase):
 			communication_medium="Email",
 			email_account=make_email_account(),
 		)
-		frappe.db.after_commit.run()
 		note = frappe.db.get_value(
 			"CRM Notification",
 			{"to_user": officer, "reference_name": c},
@@ -135,34 +133,58 @@ class TestInbound(IntegrationTestCase):
 			)
 		)
 
-	def test_blocked_sender_with_contact_auto_create_still_stores_mail(self):
+	def _new_error_logs(self, since) -> list[str]:
+		"""Error Logs written since `since`. Error Log lives in the SQLite log store, which
+		rollback doesn't reach, so the rows are also deleted at cleanup."""
+		names = frappe.get_all("Error Log", filters={"creation": [">=", since]}, pluck="name")
+		for name in names:
+			self.addCleanup(frappe.delete_doc, "Error Log", name, ignore_permissions=True)
+		return names
+
+	def test_blocked_sender_no_contact_auto_created_and_no_error_log(self):
 		started = now_datetime()
 		add_do_not_contact("Email", EMAIL, "PDR-0001")
+		c = self._receive(create_lead_from_incoming_email=1, create_contact=1)
+		self.assertTrue(frappe.db.exists("Communication", c))
+		self.assertFalse(frappe.db.exists("Contact Email", {"email_id": EMAIL}))
+		self.assertFalse(frappe.db.exists("Communication Link", {"parent": c, "link_doctype": "Contact"}))
+		self.assertEqual(self._new_error_logs(started), [])
+
+	def test_open_request_no_contact_for_her_but_co_recipient_still_created(self):
+		started = now_datetime()
+		make_request(identifiers=[{"kind": "Email", "value": EMAIL}])
 		c = make_communication(
 			sender=EMAIL,
+			recipients="inbox@northpine.example",
+			cc="Theo Brandt <Theo.Brandt@pinecrest-dental.example>",
 			sent_or_received="Received",
 			communication_medium="Email",
-			email_account=make_email_account(create_lead_from_incoming_email=1, create_contact=1),
+			email_account=make_email_account(create_contact=1),
 		)
 		self.assertTrue(frappe.db.exists("Communication", c))
 		self.assertFalse(frappe.db.exists("Contact Email", {"email_id": EMAIL}))
-		self.assertFalse(frappe.db.exists("Communication Link", {"parent": c}))
-
-		# Frappe's get_contacts catches the refused auto-create and writes an Error Log.
-		# Error Log lives in the SQLite log store, so rollback doesn't remove it.
-		logs = frappe.get_all(
-			"Error Log",
-			filters={
-				"method": "Unable to add contact",
-				"reference_doctype": "Contact",
-				"creation": [">=", started],
-			},
-			fields=["name", "method", "error"],
+		self.assertTrue(
+			frappe.db.exists("Contact Email", {"email_id": "Theo.Brandt@pinecrest-dental.example"})
 		)
-		self.assertTrue(logs)
-		for log in logs:
-			self.assertNotIn("sierrafoothills", f"{log.method} {log.error}".lower())
-			frappe.delete_doc("Error Log", log.name, ignore_permissions=True)
+		self.assertEqual(self._new_error_logs(started), [])
+
+	def test_contact_auto_create_unchanged_for_other_senders(self):
+		make_request(identifiers=[{"kind": "Email", "value": EMAIL}])
+		c = make_communication(
+			sender="Theo.Brandt@pinecrest-dental.example",
+			sent_or_received="Received",
+			communication_medium="Email",
+			email_account=make_email_account(create_contact=1),
+		)
+		contact = frappe.db.get_value(
+			"Contact Email", {"email_id": "Theo.Brandt@pinecrest-dental.example"}, "parent"
+		)
+		self.assertTrue(contact)
+		self.assertTrue(
+			frappe.db.exists(
+				"Communication Link", {"parent": c, "link_doctype": "Contact", "link_name": contact}
+			)
+		)
 
 	def test_sent_mail_and_unrelated_senders_untouched(self):
 		make_request(identifiers=[{"kind": "Email", "value": EMAIL}])

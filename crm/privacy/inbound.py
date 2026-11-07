@@ -12,7 +12,6 @@ Messages and log titles never contain the sender's address.
 """
 
 from email.utils import parseaddr
-from functools import partial
 
 import frappe
 from frappe import _
@@ -102,24 +101,36 @@ def keep_off_timelines(doc, method=None) -> None:
 
 
 def notify_blocked_inbound(doc, method=None) -> None:
-	"""Communication `after_insert`: after commit, tell Compliance an email arrived from an erased person."""
+	"""Communication `after_insert`: tell Compliance an email arrived from an erased person.
+
+	Written in the Communication's own transaction. A failure is logged and rolled back to
+	a savepoint instead of raised, so the email is still stored."""
 	if not doc.flags.erasure_blocked_sender:
 		return
 	request = blocking_request("Email", _address(doc.sender))
-	frappe.db.after_commit.add(partial(_notify_compliance, doc.name, request))
-
-
-def _notify_compliance(communication: str, request: str | None) -> None:
 	# The request log entry is deleted 24 months after its answer; the block is permanent.
 	if request and not frappe.db.exists(DOCTYPE, request):
 		request = None
-	notify(
-		compliance_users(),
-		BLOCKED_INBOUND_SUBJECT,
-		request=request,
-		reference_doctype="Communication",
-		reference_name=communication,
-	)
+
+	save_point = "erasure_blocked_inbound"
+	frappe.db.savepoint(save_point)
+	try:
+		notify(
+			compliance_users(),
+			BLOCKED_INBOUND_SUBJECT,
+			request=request,
+			reference_doctype="Communication",
+			reference_name=doc.name,
+		)
+	except Exception:
+		frappe.db.rollback(save_point=save_point)
+		frappe.log_error(
+			title="Could not notify Compliance of an email from an erased person",
+			reference_doctype="Communication",
+			reference_name=doc.name,
+		)
+	else:
+		frappe.db.release_savepoint(save_point)
 
 
 def guard_inbound_lead(doc, method=None) -> None:

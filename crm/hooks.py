@@ -245,6 +245,7 @@ override_doctype_class = {
 extend_doctype_class = {
 	"Data Import": ["crm.overrides.data_import.DataImportListView"],
 	"Assignment Rule": ["crm.overrides.assignment_rule.CRMAssignmentRule"],
+	"Communication": ["crm.overrides.communication.CRMCommunication"],
 }
 
 # Frappe v15, still supported on main-hotfix, has no extend_doctype_class
