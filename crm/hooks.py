@@ -291,6 +291,7 @@ doc_events = {
 		"on_update": [
 			"crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.create_customer_in_erpnext",
 			"crm.automation.events.on_deal_update",
+			"crm.privacy.hold.on_deal_update",
 		],
 	},
 	"CRM Lead": {

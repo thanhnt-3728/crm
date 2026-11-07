@@ -10,6 +10,7 @@ from frappe import _
 from frappe.utils import getdate
 
 from crm.privacy.deadlines import days_left
+from crm.privacy.hold import apply_hold
 from crm.privacy.identifiers import normalize_identifier
 from crm.privacy.matching import (
 	MANUAL_REASON,
@@ -320,4 +321,23 @@ def refresh_request_matches(name: str) -> dict:
 	_require(_can(doc)["edit"])
 	refresh_matches(doc)
 	doc.save()
+	return get_request(name)
+
+
+@frappe.whitelist()
+def submit_request(name: str) -> dict:
+	"""Send a Logged request for sign-off; it waits On Hold while the person is on an open deal."""
+	doc = frappe.get_doc(DOCTYPE, name)
+	_require(_can(doc)["submit"])
+	has_match = any(row.confirmed for row in doc.matches)
+	has_identifier = any(not row.excluded for row in doc.identifiers)
+	if not (has_match or has_identifier):
+		frappe.throw(_("Confirm a match or add an identifier before submitting"), frappe.ValidationError)
+
+	# The caller passed the submit check above; a logger without Compliance may not change status.
+	doc.flags.privacy_system_write = True
+	doc.flags.ignore_permissions = True
+	doc.status = "Awaiting Sign-off"
+	doc.save()
+	apply_hold(doc)
 	return get_request(name)

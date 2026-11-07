@@ -6,6 +6,17 @@ from frappe.query_builder import Order
 NOTIFICATIONS_PAGE_LENGTH = 50
 
 
+def _reference(doctype: str | None) -> tuple[str, str]:
+	"""The `reference_doctype` and `route_name` the frontend gets for a notification."""
+	if doctype == "CRM Deal":
+		return "deal", "Deal"
+	if doctype == "CRM Erasure Request":
+		return doctype, "Erasure Request"
+	if doctype == "Communication":
+		return doctype, "Erasure Requests"
+	return "lead", "Lead"
+
+
 @frappe.whitelist()
 def get_notifications():
 	Notification = frappe.qb.DocType("CRM Notification")
@@ -38,6 +49,7 @@ def get_notifications():
 
 	_notifications = []
 	for notification in notifications:
+		reference_doctype, route_name = _reference(notification.reference_doctype)
 		_notifications.append(
 			{
 				"creation": notification.creation,
@@ -52,9 +64,9 @@ def get_notifications():
 				"notification_text": notification.notification_text,
 				"notification_type_doctype": notification.notification_type_doctype,
 				"notification_type_doc": notification.notification_type_doc,
-				"reference_doctype": ("deal" if notification.reference_doctype == "CRM Deal" else "lead"),
+				"reference_doctype": reference_doctype,
 				"reference_name": notification.reference_name,
-				"route_name": ("Deal" if notification.reference_doctype == "CRM Deal" else "Lead"),
+				"route_name": route_name,
 			}
 		)
 

@@ -101,3 +101,25 @@ class TestNotificationsAPI(IntegrationTestCase):
 		mark_as_read("NO-SUCH-COMMENT")
 
 		self.assertEqual(get_unread_count(), 1)
+
+	def test_routes_by_reference_doctype(self):
+		for doctype, name in (
+			("CRM Deal", "D-1"),
+			("CRM Lead", "L-1"),
+			("CRM Erasure Request", "PDR-0001"),
+			("Communication", "COMM-1"),
+		):
+			make_notification(USER1, reference_doctype=doctype, reference_name=name)
+
+		frappe.set_user(USER1)
+		routes = {n["reference_name"]: (n["reference_doctype"], n["route_name"]) for n in get_notifications()}
+
+		self.assertEqual(
+			routes,
+			{
+				"D-1": ("deal", "Deal"),
+				"L-1": ("lead", "Lead"),
+				"PDR-0001": ("CRM Erasure Request", "Erasure Request"),
+				"COMM-1": ("Communication", "Erasure Requests"),
+			},
+		)
