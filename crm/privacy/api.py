@@ -7,7 +7,7 @@ and returns what the caller is allowed to see.
 
 import frappe
 from frappe import _
-from frappe.utils import getdate
+from frappe.utils import cint, getdate
 
 from crm.privacy.deadlines import days_left
 from crm.privacy.hold import apply_hold
@@ -349,4 +349,42 @@ def submit_request(name: str) -> dict:
 	doc.status = "Awaiting Sign-off"
 	doc.save()
 	apply_hold(doc)
+	return get_request(name)
+
+
+@frappe.whitelist()
+def approve_request(name: str, confirmation: str) -> dict:
+	"""Approve an erasure: queue the job, or put the request On Hold if she is on an open deal.
+
+	The approver types the request number to confirm. There is no undo.
+	"""
+	if not is_compliance():
+		frappe.throw(_("Only Compliance can approve an erasure"), frappe.PermissionError)
+	doc = frappe.get_doc(DOCTYPE, name)
+	if doc.logged_by == frappe.session.user:
+		frappe.throw(_("The person who logged a request cannot approve it"), frappe.PermissionError)
+	if doc.status != "Awaiting Sign-off":
+		frappe.throw(_("Only a request awaiting sign-off can be approved"), frappe.ValidationError)
+	if (confirmation or "").strip() != doc.name:
+		frappe.throw(_("Type the request number {0} to confirm").format(doc.name), frappe.ValidationError)
+	if (doc.contract_references or "").strip() and not (
+		cint(frappe.db.get_single_value("CRM Privacy Settings", "contract_retention_months")) > 0
+	):
+		frappe.throw(
+			_("Set a contract retention period in Privacy Settings before erasing a request with contracts"),
+			frappe.ValidationError,
+		)
+	if apply_hold(doc):
+		return get_request(name)
+
+	frappe.db.set_value(DOCTYPE, name, {"erasure_status": "Queued", "erasure_error": ""})
+	frappe.enqueue(
+		"crm.privacy.erasure.run_erasure",
+		queue="long",
+		job_id=f"erasure-{name}",
+		deduplicate=True,
+		enqueue_after_commit=True,
+		request=name,
+		approver=frappe.session.user,
+	)
 	return get_request(name)
