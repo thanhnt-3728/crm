@@ -1,8 +1,10 @@
+import os
 from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, getdate, today
+from frappe.utils.file_manager import save_file
 
 from crm.privacy.api import close_request, decline_request
 from crm.privacy.install import seed_outcome_template
@@ -10,6 +12,11 @@ from crm.privacy.lifecycle import purge_expired
 from crm.privacy.tests.factories import make_communication, make_compliance_user, make_request
 
 DOCTYPE = "CRM Erasure Request"
+
+
+def _remove_if_exists(path: str) -> None:
+	if os.path.exists(path):
+		os.remove(path)
 
 
 class TestLifecycle(IntegrationTestCase):
@@ -92,6 +99,28 @@ class TestLifecycle(IntegrationTestCase):
 			),
 			f"Content erased {r.name}",
 		)
+
+	def test_close_removes_files_on_the_request_and_its_mail(self):
+		officer = make_compliance_user()
+		r = make_request(identifiers=[{"kind": "Email", "value": "marisol@sierrafoothills.example"}])
+		c = make_communication(sender="marisol@sierrafoothills.example", reference=(DOCTYPE, r.name))
+		files = [
+			save_file("Marisol_ID.txt", frappe.generate_hash().encode(), "Communication", c, is_private=1),
+			save_file("Marisol_letter.txt", frappe.generate_hash().encode(), DOCTYPE, r.name, is_private=1),
+		]
+		paths = [f.get_full_path() for f in files]
+		for path in paths:
+			self.addCleanup(_remove_if_exists, path)  # the rollback leaves files on disk
+		frappe.db.set_value(DOCTYPE, r.name, "erasure_error", "An earlier attempt failed")
+		frappe.set_user(officer)
+		decline_request(r.name, "Identity not verifiable")
+		close_request(r.name, today(), "Denied")
+		for f in files:
+			self.assertFalse(frappe.db.exists("File", f.name))
+		self.assertTrue(all(os.path.exists(path) for path in paths))  # nothing leaves disk before commit
+		frappe.db.after_commit.run()
+		self.assertFalse(any(os.path.exists(path) for path in paths))
+		self.assertFalse(frappe.db.get_value(DOCTYPE, r.name, "erasure_error"))
 
 	def test_denied_needs_reason(self):
 		officer = make_compliance_user()

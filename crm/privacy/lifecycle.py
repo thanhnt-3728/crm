@@ -4,12 +4,14 @@
 Document keeps what it removes. Text written here never carries her name, email or phone.
 """
 
+from collections.abc import Callable
+
 import frappe
 from frappe.model.document import Document
 from frappe.utils import add_months, getdate
 
 from crm.privacy.rules import erased_content
-from crm.privacy.sweep import _reset_comment_caches, _wipe, erase_communications
+from crm.privacy.sweep import _reset_comment_caches, _wipe, delete_files, erase_communications, guarded
 
 DOCTYPE = "CRM Erasure Request"
 RETAINED_CONTRACT = "CRM Retained Contract"
@@ -24,6 +26,7 @@ CLEARED_FIELDS = (
 	"original_message",
 	"contract_references",
 	"decline_reason",
+	"erasure_error",  # not a log field (spec 5.8)
 )
 
 
@@ -46,14 +49,27 @@ def close(doc: Document) -> None:
 
 	The log fields (dates, type, channel, outcome, deadlines) stay; the identifiers and
 	matches go, free text becomes a placeholder. Mail attached to the request is wiped with
-	every identifier on the request, since all of them are hers.
+	every identifier on the request, since all of them are hers. Files attached to that mail
+	or to the request are deleted, and their stored bytes removed from disk after the commit.
 	"""
 	name = doc.name
 	emails = {row.value for row in doc.identifiers if row.kind == "Email" and row.value}
 	phones = {row.value for row in doc.identifiers if row.kind == "Phone" and row.value}
 	content = erased_content(name)
 
-	erase_communications(_request_communications(name), emails, phones, name)
+	communications = _request_communications(name)
+	erase_communications(communications, emails, phones, name)
+	# Attachments on her mail and on the request are hers; the purge would not reach the mail's.
+	disk_removals: list[Callable] = []
+	if communications:
+		delete_files(
+			{"attached_to_doctype": "Communication", "attached_to_name": ["in", communications]},
+			name,
+			disk_removals,
+		)
+	delete_files({"attached_to_doctype": DOCTYPE, "attached_to_name": name}, name, disk_removals)
+	for fn in disk_removals:
+		frappe.db.after_commit.add(guarded(name, fn))
 
 	frappe.db.set_value(DOCTYPE, name, {field: "" for field in CLEARED_FIELDS}, update_modified=False)
 	frappe.db.delete(IDENTIFIER, {"parent": name, "parenttype": DOCTYPE})

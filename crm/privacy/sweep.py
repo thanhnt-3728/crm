@@ -346,24 +346,44 @@ def _remove_from_disk(request: str, file_url: str, path: str) -> None:
 		)
 
 
-def _sweep_files(plan: ErasurePlan, records: Targets, request: str, after_commit: list[Callable]) -> None:
-	"""Delete her File rows; note each one removed from her records; free unshared disk files.
+def delete_files(filters: dict, request: str, after_commit: list[Callable]) -> list:
+	"""Delete the File rows matching `filters` (never folders) and queue, on `after_commit`,
+	the removal from disk of each stored file no remaining File row uses. Returns the rows.
 
 	Blob-backed rows (File Storage v2) leave their bytes to the storage garbage collector.
 	"""
-	if not plan.files:
-		return
 	rows = frappe.get_all(
 		"File",
-		filters={"name": ["in", plan.files], "is_folder": 0},
+		filters={**filters, "is_folder": 0},
 		fields=[
 			"name",
 			*_fields("File", ("file_url", "thumbnail_url", "attached_to_doctype", "attached_to_name", "blob")),
 		],
 	)
 	if not rows:
-		return
+		return []
 	frappe.db.delete("File", {"name": ["in", [row.name for row in rows]]})
+
+	urls: dict[str, None] = {}
+	for row in rows:
+		if row.get("blob"):
+			continue
+		for url in (row.get("file_url"), row.get("thumbnail_url")):
+			if url:
+				urls[url] = None
+	for url in urls:
+		path = _disk_path(url)
+		# Bytes another File row still lists are shared with another record and stay.
+		if path and not _in_use(url):
+			after_commit.append(partial(_remove_from_disk, request, url, path))
+	return rows
+
+
+def _sweep_files(plan: ErasurePlan, records: Targets, request: str, after_commit: list[Callable]) -> None:
+	"""Delete her File rows; note each one removed from her records; free unshared disk files."""
+	if not plan.files:
+		return
+	rows = delete_files({"name": ["in", plan.files]}, request, after_commit)
 
 	placeholder = erased_file(request)
 	for row in rows:
@@ -378,19 +398,6 @@ def _sweep_files(plan: ErasurePlan, records: Targets, request: str, after_commit
 					"content": placeholder,
 				}
 			)
-
-	urls: dict[str, None] = {}
-	for row in rows:
-		if row.get("blob"):
-			continue
-		for url in (row.get("file_url"), row.get("thumbnail_url")):
-			if url:
-				urls[url] = None
-	for url in urls:
-		path = _disk_path(url)
-		# Bytes another File row still lists are shared with another record and stay.
-		if path and not _in_use(url):
-			after_commit.append(partial(_remove_from_disk, request, url, path))
 
 
 # --- side tables ----------------------------------------------------------------------------
