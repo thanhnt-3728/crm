@@ -30,6 +30,37 @@ class TestPrivacySettings(IntegrationTestCase):
 		after_migrate()
 		self.assertNotIn("gender", personal_fields()["CRM Lead"])
 
+	def test_report_unknown_and_table_fields_refused(self):
+		after_migrate()
+		for document_type, fieldname in (
+			("CRM Lead", "status"),
+			("CRM Deal", "deal_value"),
+			("CRM Deal", "organization"),
+			("CRM Lead", "naming_series"),
+			("CRM Lead", "no_such_field"),
+			("CRM Deal", "contacts"),
+		):
+			settings = frappe.get_single("CRM Privacy Settings")
+			settings.append("personal_fields", {"document_type": document_type, "fieldname": fieldname})
+			with self.assertRaises(frappe.ValidationError, msg=fieldname):
+				settings.save(ignore_permissions=True)
+
+	def test_empty_personal_fields_refused(self):
+		settings = frappe.get_single("CRM Privacy Settings")
+		settings.personal_fields = []
+		with self.assertRaises(frappe.ValidationError):
+			settings.save(ignore_permissions=True)
+
+	def test_name_and_identifier_fields_always_listed(self):
+		after_migrate()
+		frappe.db.delete(
+			"CRM Personal Field",
+			{"parent": "CRM Privacy Settings", "document_type": "CRM Lead", "fieldname": ["in", ["email", "phone"]]},
+		)
+		listed = personal_fields()
+		self.assertTrue({"first_name", "lead_name", "email", "mobile_no", "phone"} <= listed["CRM Lead"])
+		self.assertTrue({"email_id", "mobile_no", "phone", "full_name"} <= listed["Contact"])
+
 	def test_secret_generated_once(self):
 		self.assertEqual(get_secret(), get_secret())
 		self.assertEqual(len(get_secret()), 64)

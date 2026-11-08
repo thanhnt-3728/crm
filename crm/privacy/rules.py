@@ -67,6 +67,38 @@ DEFAULT_PERSONAL_FIELDS: dict[str, list[str]] = {
 	"CRM Contacts": ["full_name", "email", "mobile_no", "phone", "gender"],
 }
 
+# Name and identifier fields an erasure always scrubs, whatever the settings list says.
+_ALWAYS_ERASED = frozenset(
+	{"first_name", "middle_name", "last_name", "full_name", "lead_name", "email", "email_id", "mobile_no", "phone"}
+)
+REQUIRED_PERSONAL_FIELDS: dict[str, list[str]] = {
+	document_type: [fieldname for fieldname in fieldnames if fieldname in _ALWAYS_ERASED]
+	for document_type, fieldnames in DEFAULT_PERSONAL_FIELDS.items()
+}
+
+# Report, ownership and naming fields that may never be listed: dashboards count and sum
+# leads and deals by these, and erasing them would change the numbers.
+FORBIDDEN_PERSONAL_FIELDS = frozenset(
+	{
+		"name",
+		"naming_series",
+		"status",
+		"source",
+		"territory",
+		"lead_owner",
+		"deal_owner",
+		"organization",
+		"deal_value",
+		"annual_revenue",
+		"probability",
+		"currency",
+		"exchange_rate",
+		"expected_closure_date",
+		"closed_date",
+		"lost_reason",
+	}
+)
+
 
 def erased_person(request: str) -> str:
 	return f"Erased person {request}"

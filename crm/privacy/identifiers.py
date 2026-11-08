@@ -57,16 +57,28 @@ def get_secret() -> str:
 
 
 def personal_fields() -> dict[str, set[str]]:
-	"""Doctype -> fieldnames an erasure scrubs, as configured in CRM Privacy Settings."""
+	"""Doctype -> fieldnames an erasure scrubs.
+
+	The list configured in CRM Privacy Settings, always including the name and identifier
+	fields (`REQUIRED_PERSONAL_FIELDS`) and never a report field (`FORBIDDEN_PERSONAL_FIELDS`),
+	whatever the table holds.
+	"""
+	# rules imports this module, so it is imported here.
+	from crm.privacy.rules import FORBIDDEN_PERSONAL_FIELDS, REQUIRED_PERSONAL_FIELDS
+
 	rows = frappe.get_all(
 		"CRM Personal Field",
 		filters={"parent": SETTINGS, "parenttype": SETTINGS, "parentfield": "personal_fields"},
 		fields=["document_type", "fieldname"],
 		parent_doctype=SETTINGS,
 	)
-	result: dict[str, set[str]] = {}
+	result: dict[str, set[str]] = {
+		document_type: set(fieldnames) for document_type, fieldnames in REQUIRED_PERSONAL_FIELDS.items()
+	}
 	for row in rows:
-		result.setdefault(row.document_type, set()).add(row.fieldname)
+		fieldname = (row.fieldname or "").strip()
+		if fieldname and fieldname not in FORBIDDEN_PERSONAL_FIELDS:
+			result.setdefault(row.document_type, set()).add(fieldname)
 	return result
 
 

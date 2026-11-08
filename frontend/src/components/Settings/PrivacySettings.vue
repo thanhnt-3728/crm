@@ -70,7 +70,9 @@
           </div>
           <div class="text-p-sm text-ink-gray-5">
             {{
-              __('Fields an erasure request scrubs. Removed rows stay removed.')
+              __(
+                'Extra fields an erasure request scrubs. Names, emails and phone numbers are always erased, listed or not. Report fields such as status, owner, organization and deal value cannot be listed.',
+              )
             }}
           </div>
         </div>
@@ -169,6 +171,9 @@ function validate() {
   const months = Number(settings.doc.contract_retention_months)
   if (!Number.isInteger(months) || months < 0) {
     return __('Contract retention period must be a whole number of months')
+  }
+  if (!settings.doc.personal_fields?.length) {
+    return __('List at least one personal field')
   }
   const seen = new Set()
   for (const row of settings.doc.personal_fields || []) {

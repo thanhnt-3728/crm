@@ -229,6 +229,27 @@ class TestErasureRecords(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("CRM Deal", self.m.won_deal, "next_step"), "")
 		self.assertEqual(frappe.db.get_value("CRM Deal", removed, "next_step"), "Send Marisol the proposal")
 
+	def test_lead_identifiers_blanked_when_unlisted_and_report_fields_never(self):
+		frappe.db.delete(
+			"CRM Personal Field",
+			{"parenttype": "CRM Privacy Settings", "document_type": "CRM Lead", "fieldname": ["in", ["email", "mobile_no"]]},
+		)
+		# A row saved before the settings were validated: status must still survive.
+		frappe.get_doc(
+			{
+				"doctype": "CRM Personal Field",
+				"parent": "CRM Privacy Settings",
+				"parenttype": "CRM Privacy Settings",
+				"parentfield": "personal_fields",
+				"document_type": "CRM Lead",
+				"fieldname": "status",
+			}
+		).db_insert()
+		run_erasure(self.name, self.officer)
+		self.assertEqual(
+			frappe.db.get_value("CRM Lead", self.m.lead, ["email", "mobile_no", "status"]), ("", "", "New")
+		)
+
 	def test_compliance_logger_cannot_approve_own_request(self):
 		frappe.set_user(self.officer)
 		own = log_request()
