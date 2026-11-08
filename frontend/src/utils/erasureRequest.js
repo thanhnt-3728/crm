@@ -36,6 +36,32 @@ export function matchRoute(doctype, name) {
   return { name: target.name, params: { [target.param]: name } }
 }
 
+function sameValue(a, b) {
+  return String(a ?? '') === String(b ?? '')
+}
+
+// The keys whose form value differs from the saved doc, with the form's value.
+export function changedFields(form, doc, keys) {
+  const changed = {}
+  for (const key of keys) {
+    if (!sameValue(form[key], doc[key])) changed[key] = form[key]
+  }
+  return changed
+}
+
+// The form after the saved doc was refreshed. A field the user has edited since
+// the last sync (form differs from baseline) keeps their text; any other field
+// takes the doc's value. So a table save never wipes unsaved typing, and a form
+// save ends clean because the doc now holds what the form holds.
+export function mergeForm(form, baseline, doc, keys) {
+  const merged = {}
+  for (const key of keys) {
+    const edited = !sameValue(form[key], baseline[key])
+    merged[key] = edited ? form[key] : (doc[key] ?? '')
+  }
+  return merged
+}
+
 export function confirmationMatches(typed, requestName) {
   return (typed || '').trim() === requestName
 }

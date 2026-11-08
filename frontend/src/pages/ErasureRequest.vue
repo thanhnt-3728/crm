@@ -282,13 +282,13 @@
     <DeclineRequestDialog
       v-model="showDecline"
       :requestName="requestId"
-      @done="onResult"
+      @done="onDialogResult"
     />
     <CloseRequestDialog
       v-model="showClose"
       :requestName="requestId"
       :declined="data.status === 'Declined'"
-      @done="onResult"
+      @done="onDialogResult"
     />
     <!-- Seam for the approval modal: it opens when showApprove is true and
          hands the refreshed request to onResult. -->
@@ -303,7 +303,12 @@ import RequestIdentifiers from '@/components/Privacy/RequestIdentifiers.vue'
 import RequestMatches from '@/components/Privacy/RequestMatches.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import { formatDate } from '@/utils'
-import { daysLeftLabel, statusTheme } from '@/utils/erasureRequest'
+import {
+  changedFields,
+  daysLeftLabel,
+  mergeForm,
+  statusTheme,
+} from '@/utils/erasureRequest'
 import {
   Badge,
   Breadcrumbs,
@@ -373,29 +378,42 @@ const arrivedViaOptions = ['Email', 'Phone', 'Web form', 'Mail', 'Other'].map(
 // Editable copy of the plain fields; tables and ticks save on their own.
 const form = reactive(Object.fromEntries(FORM_KEYS.map((key) => [key, ''])))
 
-function isSame(a, b) {
-  return String(a ?? '') === String(b ?? '')
-}
-
-const changedValues = computed(() => {
-  const values = {}
-  for (const key of FORM_KEYS) {
-    if (key === 'contract_references' && !isCompliance.value) continue
-    if (!isSame(form[key], doc.value[key])) values[key] = form[key]
-  }
-  return values
-})
+const formKeys = computed(() =>
+  FORM_KEYS.filter(
+    (key) => key !== 'contract_references' || isCompliance.value,
+  ),
+)
+const changedValues = computed(() =>
+  changedFields(form, doc.value, formKeys.value),
+)
 const dirty = computed(() => Object.keys(changedValues.value).length > 0)
 
-function resetForm() {
-  for (const key of FORM_KEYS) form[key] = doc.value[key] ?? ''
+// The doc values the form was last synced to, and which request they belong to.
+let baseline = {}
+let syncedName = null
+
+function snapshot() {
+  baseline = Object.fromEntries(
+    FORM_KEYS.map((key) => [key, doc.value[key] ?? '']),
+  )
+  syncedName = doc.value.name ?? null
 }
 
-// A reload (polling, refresh) must not overwrite what the user is typing.
+// Drop unsaved edits and show the saved doc (a different request, or after the
+// request moved on through Decline or Close).
+function resetForm() {
+  for (const key of FORM_KEYS) form[key] = doc.value[key] ?? ''
+  snapshot()
+}
+
+// A refreshed doc (table save, polling) must not overwrite what the user is
+// typing: only fields they have not touched take the saved value.
 watch(
   doc,
   () => {
-    if (!dirty.value) resetForm()
+    if (doc.value.name !== syncedName) return resetForm()
+    Object.assign(form, mergeForm(form, baseline, doc.value, FORM_KEYS))
+    snapshot()
   },
   { immediate: true },
 )
@@ -411,8 +429,14 @@ function showError(error) {
   )
 }
 
+// Apply a refreshed request. Unsaved form edits survive; the doc watcher merges.
 function onResult(result) {
   request.setData(result)
+}
+
+// Decline and Close end the editing session, so start the form over.
+function onDialogResult(result) {
+  onResult(result)
   resetForm()
 }
 

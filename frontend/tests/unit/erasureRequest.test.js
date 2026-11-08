@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   confirmationMatches,
+  changedFields,
   daysLeftLabel,
   matchRoute,
+  mergeForm,
   statusTheme,
 } from '@/utils/erasureRequest'
 
@@ -44,6 +46,56 @@ describe('matchRoute', () => {
   })
   it('has no link for other types', () => {
     expect(matchRoute('Note', 'x')).toBeNull()
+  })
+})
+
+describe('changedFields', () => {
+  const keys = ['requester_name', 'original_message']
+
+  it('is empty when the form matches the saved doc', () => {
+    const doc = { requester_name: 'A', original_message: null }
+    const form = { requester_name: 'A', original_message: '' }
+    expect(changedFields(form, doc, keys)).toEqual({})
+  })
+  it('returns only the keys the user changed', () => {
+    const doc = { requester_name: 'A', original_message: 'm' }
+    const form = { requester_name: 'B', original_message: 'm' }
+    expect(changedFields(form, doc, keys)).toEqual({ requester_name: 'B' })
+  })
+})
+
+describe('mergeForm', () => {
+  const keys = ['requester_name', 'original_message']
+
+  it('keeps what the user typed when a table save refreshes the doc', () => {
+    const baseline = { requester_name: '', original_message: '' }
+    const form = { requester_name: 'Jo', original_message: '' }
+    const doc = { requester_name: '', original_message: '' }
+    expect(mergeForm(form, baseline, doc, keys)).toEqual({
+      requester_name: 'Jo',
+      original_message: '',
+    })
+  })
+  it('takes server changes for fields the user has not touched', () => {
+    const baseline = { requester_name: 'A', original_message: 'm' }
+    const form = { requester_name: 'Jo', original_message: 'm' }
+    const doc = { requester_name: 'A', original_message: 'new' }
+    expect(mergeForm(form, baseline, doc, keys)).toEqual({
+      requester_name: 'Jo',
+      original_message: 'new',
+    })
+  })
+  it('ends clean after the form itself was saved', () => {
+    const baseline = { requester_name: '', original_message: '' }
+    const form = { requester_name: 'Jo', original_message: '' }
+    const saved = { requester_name: 'Jo', original_message: '' }
+    const merged = mergeForm(form, baseline, saved, keys)
+    expect(changedFields(merged, saved, keys)).toEqual({})
+  })
+  it('treats null and missing doc values as empty', () => {
+    const form = { requester_name: '', original_message: '' }
+    const merged = mergeForm(form, {}, { requester_name: null }, keys)
+    expect(merged).toEqual({ requester_name: '', original_message: '' })
   })
 })
 
