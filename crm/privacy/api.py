@@ -56,15 +56,24 @@ def _can(doc, user: str | None = None) -> dict:
 	compliance = is_compliance(user)
 	logger = doc.logged_by == user
 	status = doc.status
-	edit = (logger and status == "Logged") or (compliance and status not in ("Erased", "Closed"))
+	# Once approved the job re-reads the request, so nothing may change until it has run.
+	queued = doc.erasure_status == "Queued"
+	edit = not queued and ((logger and status == "Logged") or (compliance and status not in ("Erased", "Closed")))
 	return {
 		"edit": edit,
 		"submit": edit and status == "Logged",
-		"approve": compliance and not logger and status == "Awaiting Sign-off",
-		"decline": compliance and status in ("Logged", "Awaiting Sign-off", "On Hold"),
+		"approve": compliance and not logger and not queued and status == "Awaiting Sign-off",
+		"decline": compliance and not queued and status in ("Logged", "Awaiting Sign-off", "On Hold"),
 		"close": compliance and status in ("Erased", "Declined"),
-		"manage_checklist": compliance and status != "Closed",
+		"manage_checklist": compliance and not queued and status != "Closed",
 	}
+
+
+def _refuse_while_queued(doc) -> None:
+	"""The erasure job plans from the request when it runs: edits, a decline or a second
+	approval made while it waits would change or race what it erases."""
+	if doc.erasure_status == "Queued":
+		frappe.throw(_("This request is being erased and cannot be changed"), frappe.ValidationError)
 
 
 def _typed_identifiers(pairs: list[tuple[str, str | None]]) -> list[dict]:
@@ -298,6 +307,7 @@ def save_request(name: str, values: dict) -> dict:
 			values[key] = rows
 
 	doc = frappe.get_doc(DOCTYPE, name)
+	_refuse_while_queued(doc)
 	can = _can(doc)
 	if any(key not in CHECKLIST_ONLY_KEYS for key in values):
 		_require(can["edit"])
@@ -329,6 +339,7 @@ def save_request(name: str, values: dict) -> dict:
 def refresh_request_matches(name: str) -> dict:
 	"""Recompute suggested matches (e.g. after the identifiers changed elsewhere)."""
 	doc = frappe.get_doc(DOCTYPE, name)
+	_refuse_while_queued(doc)
 	_require(_can(doc)["edit"])
 	refresh_matches(doc)
 	doc.save()
@@ -339,6 +350,7 @@ def refresh_request_matches(name: str) -> dict:
 def submit_request(name: str) -> dict:
 	"""Send a Logged request for sign-off; it waits On Hold while the person is on an open deal."""
 	doc = frappe.get_doc(DOCTYPE, name)
+	_refuse_while_queued(doc)
 	_require(_can(doc)["submit"])
 	has_match = any(row.confirmed for row in doc.matches)
 	has_identifier = any(not row.excluded for row in doc.identifiers)
@@ -367,6 +379,7 @@ def approve_request(name: str, confirmation: str) -> dict:
 		frappe.throw(_("The person who logged a request cannot approve it"), frappe.PermissionError)
 	if doc.status != "Awaiting Sign-off":
 		frappe.throw(_("Only a request awaiting sign-off can be approved"), frappe.ValidationError)
+	_refuse_while_queued(doc)
 	if (confirmation or "").strip() != doc.name:
 		frappe.throw(_("Type the request number {0} to confirm").format(doc.name), frappe.ValidationError)
 	if (doc.contract_references or "").strip() and not (
@@ -398,6 +411,7 @@ def decline_request(name: str, reason: str) -> dict:
 	if not is_compliance():
 		frappe.throw(_("Only Compliance can decline a request"), frappe.PermissionError)
 	doc = frappe.get_doc(DOCTYPE, name)
+	_refuse_while_queued(doc)
 	if not _can(doc)["decline"]:
 		frappe.throw(_("This request can no longer be declined"), frappe.ValidationError)
 	reason = (reason or "").strip()

@@ -7,7 +7,14 @@ from frappe.tests import IntegrationTestCase
 from crm.fcrm.doctype.crm_deal.test_crm_deal import create_test_deal
 from crm.permissions.test_org_hierarchy import make_user
 from crm.privacy import erasure
-from crm.privacy.api import approve_request, log_request, save_request, submit_request
+from crm.privacy.api import (
+	approve_request,
+	decline_request,
+	log_request,
+	refresh_request_matches,
+	save_request,
+	submit_request,
+)
 from crm.privacy.erasure import run_erasure
 from crm.privacy.tests.factories import MARISOL_EMAIL, make_communication, make_compliance_user, make_marisol
 
@@ -111,6 +118,37 @@ class TestErasureRecords(IntegrationTestCase):
 			request=self.name,
 			approver=self.officer,
 		)
+
+	def test_queued_request_is_locked(self):
+		frappe.set_user(self.officer)
+		with patch("frappe.enqueue"):
+			out = approve_request(self.name, self.name)
+		self.assertEqual(out["doc"]["erasure_status"], "Queued")
+		for action in ("edit", "submit", "approve", "decline", "manage_checklist"):
+			self.assertFalse(out["can"][action], action)
+		attempts = {
+			"approve": lambda: approve_request(self.name, self.name),
+			"decline": lambda: decline_request(self.name, "Changed our minds"),
+			"edit": lambda: save_request(self.name, {"other_names": "M. Vega"}),
+			"checklist": lambda: save_request(self.name, {"checklist": [{"description": "Ask Twilio"}]}),
+			"refresh": lambda: refresh_request_matches(self.name),
+		}
+		for label, attempt in attempts.items():
+			with self.assertRaises(frappe.ValidationError, msg=label):
+				attempt()
+		doc = frappe.get_doc("CRM Erasure Request", self.name)
+		doc.other_names = "M. Vega"
+		with self.assertRaises(frappe.ValidationError):
+			doc.save()  # the form save path, outside the API
+		frappe.set_user("Administrator")
+		frappe.db.set_value("CRM Erasure Request", self.name, "status", "Logged")
+		frappe.set_user(self.officer)
+		with self.assertRaises(frappe.ValidationError):
+			submit_request(self.name)
+		r = frappe.db.get_value(
+			"CRM Erasure Request", self.name, ["other_names", "decline_reason", "erasure_status"], as_dict=True
+		)
+		self.assertEqual((r.other_names, r.decline_reason, r.erasure_status), (None, None, "Queued"))
 
 	def test_approve_holds_when_she_is_on_an_open_deal(self):
 		create_test_deal(status="Negotiation", deal_value=1, contacts=[{"contact": self.m.contact}])

@@ -154,6 +154,10 @@ class CRMErasureRequest(Document):
 			return
 		before = self.get_doc_before_save()
 
+		if before and before.erasure_status == "Queued":
+			# The erasure job plans from the request when it runs.
+			frappe.throw(_("This request is being erased and cannot be changed"), frappe.ValidationError)
+
 		if before and self.logged_by != before.logged_by:
 			frappe.throw(_("The logger of a request cannot be changed"), frappe.PermissionError)
 
