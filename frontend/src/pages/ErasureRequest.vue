@@ -290,12 +290,18 @@
       :declined="data.status === 'Declined'"
       @done="onDialogResult"
     />
-    <!-- Seam for the approval modal: it opens when showApprove is true and
-         hands the refreshed request to onResult. -->
+    <!-- Approval hands back the refreshed request (Queued, or On Hold). Not
+         resetForm: unsaved edits survive, as with table saves. -->
+    <ApproveErasureModal
+      v-model="showApprove"
+      :requestName="requestId"
+      @approved="onResult"
+    />
   </template>
 </template>
 
 <script setup>
+import ApproveErasureModal from '@/components/Privacy/ApproveErasureModal.vue'
 import CloseRequestDialog from '@/components/Privacy/CloseRequestDialog.vue'
 import DeclineRequestDialog from '@/components/Privacy/DeclineRequestDialog.vue'
 import RequestChecklist from '@/components/Privacy/RequestChecklist.vue'

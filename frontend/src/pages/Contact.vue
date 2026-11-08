@@ -12,6 +12,7 @@
         v-if="contact._actions?.length"
         :actions="contact._actions"
       />
+      <RequestErasureButton doctype="Contact" :docname="contactId" />
       <Button
         :label="__('New Deal')"
         iconLeft="lucide-plus"
@@ -179,6 +180,7 @@
 
 <script setup>
 import ErrorPage from '@/components/ErrorPage.vue'
+import RequestErasureButton from '@/components/Privacy/RequestErasureButton.vue'
 import Resizer from '@/components/Resizer.vue'
 import Icon from '@/components/Icon.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'

@@ -50,6 +50,7 @@
         v-if="document.actions?.length"
         :actions="document.actions"
       />
+      <RequestErasureButton doctype="CRM Deal" :docname="dealId" />
     </div>
   </div>
   <div v-if="doc.name" class="flex h-full overflow-hidden">
@@ -277,6 +278,7 @@
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
 import ErrorPage from '@/components/ErrorPage.vue'
 import Icon from '@/components/Icon.vue'
+import RequestErasureButton from '@/components/Privacy/RequestErasureButton.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
 import LoadingIndicator from '@/components/Icons/LoadingIndicator.vue'
 import ActivityIcon from '@/components/Icons/ActivityIcon.vue'

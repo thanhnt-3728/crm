@@ -36,6 +36,7 @@
           </Button>
         </template>
       </Dropdown>
+      <RequestErasureButton doctype="CRM Lead" :docname="leadId" />
       <Tooltip
         :disabled="!isLeadConversionDisabled"
         :text="__('Cannot convert a lost lead to deal')"
@@ -248,6 +249,7 @@
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
 import ErrorPage from '@/components/ErrorPage.vue'
 import Icon from '@/components/Icon.vue'
+import RequestErasureButton from '@/components/Privacy/RequestErasureButton.vue'
 import Resizer from '@/components/Resizer.vue'
 import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
 import EmailIcon from '@/components/Icons/EmailIcon.vue'
