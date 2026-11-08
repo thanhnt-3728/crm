@@ -1,0 +1,58 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-11-07 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "person_name",
+  "contract_references",
+  "request",
+  "delete_after"
+ ],
+ "fields": [
+  {
+   "fieldname": "person_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Person Name"
+  },
+  {
+   "fieldname": "contract_references",
+   "fieldtype": "Small Text",
+   "label": "Contract References"
+  },
+  {
+   "description": "Request number as text, so purging the request leaves no broken link.",
+   "fieldname": "request",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Request"
+  },
+  {
+   "fieldname": "delete_after",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Delete After",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Privacy",
+ "name": "CRM Retained Contract",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "Compliance"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

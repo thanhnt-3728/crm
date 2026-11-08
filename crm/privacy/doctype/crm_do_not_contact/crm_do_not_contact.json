@@ -1,0 +1,55 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-11-07 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "identifier_hash",
+  "kind",
+  "request"
+ ],
+ "fields": [
+  {
+   "description": "Keyed hash of the normalized email or phone. The identifier itself is never stored.",
+   "fieldname": "identifier_hash",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Identifier Hash",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Kind",
+   "options": "Email\nPhone"
+  },
+  {
+   "description": "Request number as text, so purging the request leaves no broken link.",
+   "fieldname": "request",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Request"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Privacy",
+ "name": "CRM Do Not Contact",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "Compliance"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

@@ -144,6 +144,7 @@ permission_query_conditions = {
 	"CRM Deal": "crm.permissions.org_hierarchy.get_deal_permission_query_conditions",
 	"CRM Notification": "crm.fcrm.doctype.crm_notification.crm_notification.get_permission_query_conditions",
 	"CRM Enrichment Run": "crm.domain_enrichment.doctype.crm_enrichment_run.crm_enrichment_run.get_permission_query_conditions",
+	"CRM Erasure Request": "crm.privacy.permissions.get_permission_query_conditions",
 }
 
 has_permission = {
@@ -151,6 +152,7 @@ has_permission = {
 	"CRM Deal": "crm.permissions.org_hierarchy.has_deal_permission",
 	"CRM Notification": "crm.fcrm.doctype.crm_notification.crm_notification.has_permission",
 	"CRM Enrichment Run": "crm.domain_enrichment.doctype.crm_enrichment_run.crm_enrichment_run.has_permission",
+	"CRM Erasure Request": "crm.privacy.permissions.has_permission",
 }
 
 # Automation Engine
@@ -243,6 +245,7 @@ override_doctype_class = {
 extend_doctype_class = {
 	"Data Import": ["crm.overrides.data_import.DataImportListView"],
 	"Assignment Rule": ["crm.overrides.assignment_rule.CRMAssignmentRule"],
+	"Communication": ["crm.overrides.communication.CRMCommunication"],
 }
 
 # Frappe v15, still supported on main-hotfix, has no extend_doctype_class
@@ -255,7 +258,8 @@ if int(frappe.__version__.split(".")[0]) < 16:
 
 doc_events = {
 	"Contact": {
-		"validate": ["crm.api.contact.validate"],
+		# the block runs first: contact.validate writes linked deals before it could throw
+		"validate": ["crm.privacy.blocking.check_doc", "crm.api.contact.validate"],
 	},
 	"Notification Log": {
 		"before_insert": ["crm.extends.notification_log.before_insert"],
@@ -266,9 +270,13 @@ doc_events = {
 		"on_update": ["crm.api.todo.on_update"],
 	},
 	"Communication": {
+		"before_insert": ["crm.privacy.inbound.route_inbound_email"],
+		# after Communication.validate re-adds timeline links
+		"validate": ["crm.privacy.inbound.keep_off_timelines"],
 		"after_insert": [
 			"crm.utils.on_communication_insert",
 			"crm.automation.events.on_communication",
+			"crm.privacy.inbound.notify_blocked_inbound",
 		],
 		"on_update": ["crm.utils.on_communication_update"],
 		"on_change": ["crm.api.email.stamp_send_time"],
@@ -286,12 +294,16 @@ doc_events = {
 		],
 	},
 	"CRM Deal": {
+		"validate": ["crm.privacy.blocking.check_doc"],
 		"on_update": [
 			"crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.create_customer_in_erpnext",
 			"crm.automation.events.on_deal_update",
+			"crm.privacy.hold.on_deal_update",
 		],
 	},
 	"CRM Lead": {
+		"before_insert": ["crm.privacy.inbound.guard_inbound_lead"],
+		"validate": ["crm.privacy.blocking.check_doc"],
 		"on_update": ["crm.automation.events.on_lead_update"],
 	},
 	"Sales Order": {
@@ -356,6 +368,8 @@ scheduler_events = {
 		"crm.fcrm.doctype.crm_invitation.crm_invitation.expire_invitations",
 		"crm.fcrm.doctype.crm_view_settings.crm_view_settings.clear_old_versions",
 		"crm.telemetry.capture_feature_state",
+		"crm.privacy.lifecycle.purge_expired",
+		"crm.privacy.reminders.send_reminders",
 	],
 	"weekly": ["crm.api.event.trigger_weekly_event_notifications"],
 	"daily_long": ["crm.lead_syncing.background_sync.sync_leads_from_sources_daily"],
@@ -443,6 +457,7 @@ after_migrate = [
 	"crm.fcrm.doctype.fcrm_settings.fcrm_settings.after_migrate",
 	"crm.api.whatsapp.add_roles",
 	"crm.domain_enrichment.install.seed_default_rules_and_mappings",
+	"crm.privacy.install.after_migrate",
 	"crm.install.add_default_scripts",
 	"crm.install.add_web_form_custom_fields",
 ]

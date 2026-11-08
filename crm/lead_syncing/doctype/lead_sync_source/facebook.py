@@ -5,6 +5,8 @@ from frappe.exceptions import ValidationError
 from frappe.integrations.utils import make_get_request
 from frappe.utils import get_datetime, get_system_timezone, now_datetime
 
+from crm.privacy.blocking import data_is_blocked
+
 FB_GRAPH_API_BASE = "https://graph.facebook.com"
 FB_GRAPH_API_VERSION = "v23.0"
 # Meta compares whole seconds and its clock is not ours, so each run re-reads a few
@@ -59,6 +61,10 @@ class FacebookSyncSource:
 		crm_lead_data["source"] = "Facebook"
 		crm_lead_data["facebook_lead_id"] = lead["id"]
 		crm_lead_data["facebook_form_id"] = self.form_id
+
+		# skipped without a failure log, which would store the erased person's data
+		if data_is_blocked("CRM Lead", crm_lead_data):
+			return
 
 		try:
 			self.validate_duplicate_lead(crm_lead_data, question_to_field_map)

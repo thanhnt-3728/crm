@@ -68,6 +68,7 @@
                 <span>{{ contact.doc.full_name }}</span>
               </div>
               <div class="flex items-center gap-1.5">
+                <RequestErasureButton doctype="Contact" :docname="contactId" />
                 <Button
                   v-if="callEnabled && contact.doc.mobile_no"
                   :label="__('Make a Call')"
@@ -152,6 +153,7 @@
 
 <script setup>
 import Icon from '@/components/Icon.vue'
+import RequestErasureButton from '@/components/Privacy/RequestErasureButton.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
