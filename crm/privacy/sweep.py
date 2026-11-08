@@ -469,7 +469,25 @@ def _sweep_email_queue(plan: ErasurePlan, targets: Targets, content: str, person
 	_sweep_text("Email Queue", ("error",), set(), errors, plan, content, person)
 
 
-def _sweep_whatsapp(plan: ErasurePlan, records: Targets, content: str, person: str) -> None:
+def _delete_whatsapp_media(messages: list[str], request: str, after_commit: list[Callable]) -> None:
+	"""Delete the media files of the messages, before `attach` is blanked.
+
+	Received media is a File attached to the WA Message. Sent media is the upload that
+	`attach` names (a File name, or a URL in older whatsapp versions), attached to no record;
+	one attached to a record stays with that record.
+	"""
+	delete_files({"attached_to_doctype": "WA Message", "attached_to_name": ["in", messages]}, request, after_commit)
+	if not _fields("WA Message", ("attach",)):
+		return
+	attached = [a for a in frappe.get_all("WA Message", {"name": ["in", messages]}, pluck="attach") if a]
+	if attached:
+		for key in ("name", "file_url"):
+			delete_files({key: ["in", attached], "attached_to_doctype": ["is", "not set"]}, request, after_commit)
+
+
+def _sweep_whatsapp(
+	plan: ErasurePlan, records: Targets, content: str, person: str, request: str, after_commit: list[Callable]
+) -> None:
 	if not (_exists("WA Message") and _exists("WA Profile")):
 		return
 	profiles: list[str] = []
@@ -480,9 +498,13 @@ def _sweep_whatsapp(plan: ErasurePlan, records: Targets, content: str, person: s
 	messages = _referencing("WA Message", "reference_doctype", "reference_docname", records)
 	if profiles:
 		messages |= set(frappe.get_all("WA Message", {"to": ["in", profiles]}, pluck="name"))
+	if messages:
+		_delete_whatsapp_media(sorted(messages), request, after_commit)
 	_wipe("WA Message", messages, ("message",), content)
-	# media_url holds the incoming document's file name
-	_wipe("WA Message", messages, ("template_body_parameters", "template_header_parameters", "media_url"), "")
+	# media_url holds the incoming document's file name; attach names the media File
+	_wipe(
+		"WA Message", messages, ("template_body_parameters", "template_header_parameters", "media_url", "attach"), ""
+	)
 	_sweep_text("WA Message", ("error_message",), set(), messages, plan, content, person)
 
 	_wipe("WA Profile", profiles, ("phone_number", "profile_name", "wa_id"), person)
@@ -605,7 +627,7 @@ def sweep_activities(plan: ErasurePlan, doc: Document, after_commit: list[Callab
 	_sweep_notification_logs(plan, targets, content, person)
 	_sweep_todos(plan, targets, content, person)
 	_sweep_email_queue(plan, targets, content, person)
-	_sweep_whatsapp(plan, records, content, person)
+	_sweep_whatsapp(plan, records, content, person, request, after_commit)
 	_sweep_event_participants(plan, person)
 	_sweep_lead_sync_logs(plan, content)
 	_sweep_enrichment_runs(records, content)

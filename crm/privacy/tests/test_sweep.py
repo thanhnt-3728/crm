@@ -497,6 +497,33 @@ class TestSweep(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("WA Message", on_lead.name, "message"), self.C)
 		self.assertEqual(frappe.db.get_value("WA Message", unrelated.name, "message"), "Hi Dana")
 
+	def test_whatsapp_media_files_deleted_and_attach_blanked(self):
+		if not frappe.db.table_exists("WA Message"):
+			self.skipTest("whatsapp is not installed")
+		hers = _raw({"doctype": "WA Profile", "phone_number": "+15305550142", "profile_name": "Marisol"})
+		other = _raw({"doctype": "WA Profile", "phone_number": "+15550001111", "profile_name": "Dana"})
+		incoming = _raw({"doctype": "WA Message", "to": hers.name, "direction": "Incoming", "message": "My ID"})
+		outgoing = _raw({"doctype": "WA Message", "to": hers.name, "direction": "Outgoing", "message": "Form"})
+		unrelated = _raw({"doctype": "WA Message", "to": other.name, "direction": "Incoming", "message": "Hi"})
+		received = self._save_file("Marisol_ID.txt", frappe.generate_hash().encode(), "WA Message", incoming.name)
+		# Outgoing media: `attach` names an upload attached to no record.
+		sent = self._save_file("Marisol_form.txt", frappe.generate_hash().encode(), None, None)
+		kept = self._save_file("Dana.txt", frappe.generate_hash().encode(), "WA Message", unrelated.name)
+		for message, f in ((incoming, received), (outgoing, sent), (unrelated, kept)):
+			frappe.db.set_value("WA Message", message.name, "attach", f.name)
+		paths = [f.get_full_path() for f in (received, sent)]
+		run_erasure(self.name, self.officer)
+		for message in (incoming, outgoing):
+			self.assertEqual(frappe.db.get_value("WA Message", message.name, "attach"), "")
+		for f in (received, sent):
+			self.assertFalse(frappe.db.exists("File", f.name))
+		self.assertTrue(all(os.path.exists(path) for path in paths))  # nothing leaves disk before commit
+		frappe.db.after_commit.run()
+		self.assertFalse(any(os.path.exists(path) for path in paths))
+		self.assertEqual(frappe.db.get_value("WA Message", unrelated.name, "attach"), kept.name)
+		self.assertTrue(frappe.db.exists("File", kept.name))
+		self.assertTrue(os.path.exists(kept.get_full_path()))
+
 	def test_touched_activities_reindexed_after_commit(self):
 		c = make_communication(sender="tyler@northpine.example", recipients=MARISOL_EMAIL)
 		note = make_note(("CRM Lead", self.m.lead))
