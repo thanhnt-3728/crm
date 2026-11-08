@@ -2,6 +2,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from crm.fcrm.doctype.crm_deal.crm_deal import remove_contact
+from crm.fcrm.doctype.crm_deal.test_crm_deal import create_test_contact
 from crm.permissions.test_org_hierarchy import make_user
 from crm.privacy.api import get_erasure_preview
 from crm.privacy.plan import plan_erasure, preview, unlisted_custom_fields
@@ -211,6 +212,31 @@ class TestPlan(IntegrationTestCase):
 		p = plan_erasure(self.r)
 		self.assertTrue({linked, via_field} <= set(p.addresses))
 		self.assertNotIn(unrelated, p.addresses)
+
+	def test_shared_addresses_are_kept_not_erased(self):
+		own = _address("Marisol home", [{"link_doctype": "Contact", "link_name": self.m.contact}])
+		office = _address("Office", [{"link_doctype": "Contact", "link_name": self.m.contact}])
+		frappe.db.set_value("CRM Organization", self.m.org, "address", office)
+		colleague = create_test_contact(first_name="Theo", last_name="Brandt").name
+		together = _address(
+			"Shared",
+			[
+				{"link_doctype": "Contact", "link_name": self.m.contact},
+				{"link_doctype": "Contact", "link_name": colleague},
+			],
+		)
+		front_desk = _address("Front desk")
+		frappe.db.set_value("Contact", self.m.contact, "address", front_desk)
+		frappe.db.set_value("Contact", colleague, "address", front_desk)
+		p = plan_erasure(self.r)
+		self.assertEqual(p.addresses, [own])
+		self.assertEqual(set(p.shared_addresses), {office, together, front_desk})
+		keep = {x["label"]: x for x in preview(p)["keep"]}
+		shared = keep["Shared addresses (only her link to them is removed)"]
+		self.assertEqual({link["name"] for link in shared["links"]}, {office, together, front_desk})
+		self.assertEqual(
+			next(x for x in preview(p)["remove"] if x["kind"] == "Addresses")["count"], 1
+		)
 
 	def test_files_on_records_emails_and_images(self):
 		on_lead = _file("CRM Lead", self.m.lead, "lead.txt")

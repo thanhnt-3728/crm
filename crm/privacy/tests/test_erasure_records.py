@@ -163,6 +163,32 @@ class TestErasureRecords(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("Comment", {"reference_doctype": "Address", "comment_type": "Edit"}))
 		self.assertFalse(frappe.db.exists("Dynamic Link", {"link_title": ["like", "%Marisol%"]}))
 
+	def test_address_shared_with_organization_survives(self):
+		country = frappe.db.get_value("Country", {}, "name")
+		office = frappe.get_doc(
+			{
+				"doctype": "Address",
+				"address_title": "Sierra Foothills Dental Group",
+				"address_type": "Office",
+				"address_line1": "400 Lincoln Way",
+				"city": "Auburn",
+				"country": country,
+				"links": [{"link_doctype": "Contact", "link_name": self.m.contact}],
+			}
+		).insert()
+		frappe.db.set_value("CRM Organization", self.m.org, "address", office.name)
+		frappe.db.set_value("Contact", self.m.contact, "address", office.name)
+		run_erasure(self.name, self.officer)
+		self.assertEqual(frappe.db.get_value("CRM Erasure Request", self.name, "status"), "Erased")
+		row = frappe.db.get_value("Address", office.name, ["address_title", "address_line1", "city"], as_dict=True)
+		self.assertEqual(
+			(row.address_title, row.address_line1, row.city),
+			("Sierra Foothills Dental Group", "400 Lincoln Way", "Auburn"),
+		)
+		self.assertEqual(frappe.db.get_value("CRM Organization", self.m.org, "address"), office.name)
+		self.assertFalse(frappe.db.exists("Dynamic Link", {"parenttype": "Address", "parent": office.name}))
+		self.assertFalse(frappe.db.get_value("Contact", f"Erased person {self.name}", "address"))
+
 	def test_communication_link_titles_erased(self):
 		c = make_communication(
 			sender="tyler@northpine.example",

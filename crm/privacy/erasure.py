@@ -293,6 +293,25 @@ def _erase_addresses(plan: ErasurePlan, placeholder: str) -> None:
 		_erase_fields(ADDRESS, address, fields, named, placeholder)
 
 
+def _unlink_shared_addresses(plan: ErasurePlan) -> None:
+	"""Remove her links to addresses another record also uses. The addresses stay as they are."""
+	if not (plan.shared_addresses and plan.contacts):
+		return
+	frappe.db.delete(
+		"Dynamic Link",
+		{
+			"parenttype": ADDRESS,
+			"parent": ["in", plan.shared_addresses],
+			"link_doctype": CONTACT,
+			"link_name": ["in", plan.contacts],
+		},
+	)
+	for contact in frappe.get_all(
+		CONTACT, filters={"name": ["in", plan.contacts], "address": ["in", plan.shared_addresses]}, pluck="name"
+	):
+		frappe.db.set_value(CONTACT, contact, "address", "", update_modified=False)
+
+
 def _erase_link_titles(plan: ErasurePlan, placeholder: str) -> None:
 	"""Put the placeholder in `link_title` of link rows pointing at her records.
 
@@ -386,6 +405,7 @@ def erase_records(plan: ErasurePlan, doc: Document, after_commit: list[Callable]
 	"""Blank or replace her personal fields on leads, deals, contacts and addresses.
 
 	Contacts and addresses are renamed to the placeholder (their names are her name).
+	Addresses another record also uses are not touched; only her links to them go.
 	`plan.contacts` and `plan.addresses` are updated to the new names, so later steps
 	find the renamed records; `plan.former_names` keeps the old ones.
 	"""
@@ -398,6 +418,7 @@ def erase_records(plan: ErasurePlan, doc: Document, after_commit: list[Callable]
 	_erase_deal_identifiers(plan)
 	_erase_contacts(plan, listed, placeholder)
 	_erase_addresses(plan, placeholder)
+	_unlink_shared_addresses(plan)
 
 	# History and deleted copies outside the renamed rows still carry the old names.
 	plan.former_names = {CONTACT: list(plan.contacts), ADDRESS: list(plan.addresses)}

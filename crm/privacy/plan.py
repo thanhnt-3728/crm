@@ -64,7 +64,7 @@ class ErasurePlan:
 	contacts: list[str]  # confirmed
 	deals_on: list[str]  # confirmed deals listing a confirmed contact, or whose email/mobile/phone is hers
 	deals_removed: list[str]  # other confirmed deals
-	addresses: list[str]  # Address linked (Dynamic Link or Contact.address) to confirmed contacts
+	addresses: list[str]  # Address linked (Dynamic Link or Contact.address) only to confirmed contacts
 	communications: list[str]
 	call_logs: list[str]
 	notes: list[str]  # on records + notes linked from those call logs
@@ -75,6 +75,9 @@ class ErasurePlan:
 	her_values: dict[str, set[str]]  # case-folded name/title/social values from confirmed leads+contacts
 	# Set by erase_records before renaming: {"Contact": [...], "Address": [...]} as they were named.
 	former_names: dict[str, list[str]] = field(default_factory=dict)
+	# Addresses her contacts link to that another record (organization, other contact) also
+	# uses. Kept as they are; only her Dynamic Link rows and Contact.address are removed.
+	shared_addresses: list[str] = field(default_factory=list)
 
 
 def _unique(names) -> list[str]:
@@ -171,12 +174,38 @@ def _deals_split(
 	return [d for d in deals if d in on], [d for d in deals if d not in on]
 
 
-def _contact_addresses(contacts: list[str]) -> list[str]:
+def _only_hers(address: str, contacts: list[str]) -> bool:
+	"""True when every reference to `address` points at one of her confirmed contacts."""
+	hers = set(contacts)
+	links = frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Address", "parent": address},
+		fields=["link_doctype", "link_name"],
+		parent_doctype="Address",
+	)
+	if any(link.link_doctype != CONTACT or link.link_name not in hers for link in links):
+		return False
+	if any(name not in hers for name in frappe.get_all(CONTACT, filters={"address": address}, pluck="name")):
+		return False
+	return not frappe.db.exists("CRM Organization", {"address": address})
+
+
+def _contact_addresses(contacts: list[str]) -> tuple[list[str], list[str]]:
+	"""(addresses only her contacts use, addresses also used by another record).
+
+	A shared address (her company's, or one another contact lives at) is not hers to
+	erase: only her links to it are removed.
+	"""
 	if not contacts:
-		return []
+		return [], []
 	found = _parents_linked("Address", "Dynamic Link", "link_doctype", "link_name", {CONTACT: contacts})
 	found += [a for a in frappe.get_all(CONTACT, filters={"name": ["in", contacts]}, pluck="address") if a]
-	return [a for a in _unique(found) if frappe.db.exists("Address", a)]
+	own: list[str] = []
+	shared: list[str] = []
+	for address in _unique(found):
+		if frappe.db.exists("Address", address):
+			(own if _only_hers(address, contacts) else shared).append(address)
+	return own, shared
 
 
 def plan_erasure(request) -> ErasurePlan:
@@ -229,6 +258,7 @@ def plan_erasure(request) -> ErasurePlan:
 			pluck="name",
 		)
 
+	addresses, shared_addresses = _contact_addresses(contacts)
 	return ErasurePlan(
 		request=doc.name,
 		emails=emails,
@@ -237,7 +267,7 @@ def plan_erasure(request) -> ErasurePlan:
 		contacts=contacts,
 		deals_on=deals_on,
 		deals_removed=deals_removed,
-		addresses=_contact_addresses(contacts),
+		addresses=addresses,
 		communications=communications,
 		call_logs=call_logs,
 		notes=_unique(notes),
@@ -246,6 +276,7 @@ def plan_erasure(request) -> ErasurePlan:
 		files=_unique(files),
 		has_recordings=has_recordings,
 		her_values=_her_values(leads, contacts),
+		shared_addresses=shared_addresses,
 	)
 
 
@@ -316,6 +347,13 @@ def preview(plan: ErasurePlan) -> dict:
 		{"label": "Lead and deal records as anonymized shells", "links": []},
 		{"label": "Email, call and note records as placeholders", "links": []},
 	]
+	if plan.shared_addresses:
+		keep.append(
+			{
+				"label": "Shared addresses (only her link to them is removed)",
+				"links": _address_links(plan.shared_addresses),
+			}
+		)
 	if frappe.db.get_value(DOCTYPE, plan.request, "contract_references"):
 		keep.append({"label": "Retained-contract entry", "links": []})
 
