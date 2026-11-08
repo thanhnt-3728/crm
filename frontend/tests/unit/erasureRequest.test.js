@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  blockedAttachmentUrl,
   confirmationMatches,
   changedFields,
   daysLeftLabel,
@@ -116,6 +117,13 @@ describe('isCompleteDate', () => {
     expect(isCompleteDate('')).toBe(false)
     expect(isCompleteDate(null)).toBe(false)
   })
+})
+
+describe('blockedAttachmentUrl', () => {
+  it('points at the Compliance-only download, encoding both names', () =>
+    expect(blockedAttachmentUrl('abc 1', 'f&2')).toBe(
+      '/api/method/crm.privacy.api.download_blocked_email_attachment?email=abc%201&file=f%262',
+    ))
 })
 
 describe('confirmationMatches', () => {

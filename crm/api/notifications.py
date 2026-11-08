@@ -13,7 +13,8 @@ def _reference(doctype: str | None) -> tuple[str, str]:
 	if doctype == "CRM Erasure Request":
 		return doctype, "Erasure Request"
 	if doctype == "Communication":
-		return doctype, "Erasure Requests"
+		# Only privacy notices point at a Communication: mail from an erased person.
+		return doctype, "Erasure Email"
 	return "lead", "Lead"
 
 

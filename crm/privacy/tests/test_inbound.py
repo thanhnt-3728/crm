@@ -1,13 +1,22 @@
+import os
 from unittest.mock import patch
 
 import frappe
 from frappe.email.receive import InboundMail
 from frappe.tests import IntegrationTestCase
 from frappe.utils import now_datetime
+from frappe.utils.file_manager import save_file
 
 from crm.fcrm.doctype.crm_deal.test_crm_deal import create_test_contact
 from crm.privacy.identifiers import add_do_not_contact
-from crm.privacy.inbound import BLOCKED_INBOUND_SUBJECT, is_erasure_address, open_request_for_email
+from crm.permissions.test_org_hierarchy import make_user
+from crm.privacy.api import download_blocked_email_attachment, get_blocked_email
+from crm.privacy.inbound import (
+	BLOCKED_INBOUND_SUBJECT,
+	blocked_email,
+	is_erasure_address,
+	open_request_for_email,
+)
 from crm.privacy.tests.factories import (
 	make_communication,
 	make_compliance_user,
@@ -16,6 +25,11 @@ from crm.privacy.tests.factories import (
 )
 
 EMAIL = "marisol@sierrafoothills.example"
+
+
+def _remove_if_exists(path: str) -> None:
+	if os.path.exists(path):
+		os.remove(path)
 
 
 class TestInbound(IntegrationTestCase):
@@ -236,6 +250,15 @@ class TestInbound(IntegrationTestCase):
 		add_do_not_contact("Email", EMAIL, "PDR-0001")
 		self.assertTrue(is_erasure_address(EMAIL))
 
+	def test_blocked_email_uses_persisted_state_only(self):
+		add_do_not_contact("Email", EMAIL, "PDR-0001")
+		c = make_communication(
+			sender=EMAIL, sent_or_received="Received", communication_medium="Email", email_account=make_email_account()
+		)
+		self.assertEqual(blocked_email(c).name, c)
+		self.assertIsNone(blocked_email("no-such-communication"))
+		self.assertIsNone(blocked_email(None))
+
 	def test_guard_ignores_leads_inserted_without_ignore_mandatory(self):
 		make_request(identifiers=[{"kind": "Email", "value": EMAIL}])
 		lead = frappe.new_doc("CRM Lead")
@@ -243,3 +266,124 @@ class TestInbound(IntegrationTestCase):
 		lead.email = EMAIL
 		lead.insert(ignore_permissions=True)
 		self.assertTrue(frappe.db.exists("CRM Lead", lead.name))
+
+
+class TestBlockedEmailView(IntegrationTestCase):
+	"""Compliance's in-app view of mail that arrives after close (R20). No blanket read."""
+
+	def setUp(self):
+		self.officer = make_user("blocked.mail.officer@example.com", ["Compliance"]).name
+		self.account = make_email_account()
+		self.request = make_request(identifiers=[{"kind": "Email", "value": "someone.else@example.com"}]).name
+		add_do_not_contact("Email", EMAIL, self.request)
+		self.mail = self._received(EMAIL, subject="About my data", content="<p>Please call me</p>")
+		self.attachment = self._attach(self.mail, "Marisol_letter.txt", b"Dear Northpine")
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.db.rollback()
+
+	def _received(self, sender: str, **fields) -> str:
+		return make_communication(
+			sender=sender,
+			sent_or_received="Received",
+			communication_medium="Email",
+			email_account=self.account,
+			**fields,
+		)
+
+	def _attach(self, communication: str, file_name: str, content: bytes):
+		f = save_file(file_name, content, "Communication", communication, is_private=1)
+		self.addCleanup(_remove_if_exists, f.get_full_path())  # the rollback leaves the file on disk
+		return f
+
+	def test_compliance_sees_the_mail_and_its_attachment(self):
+		self.assertIsNone(frappe.db.get_value("Communication", self.mail, "reference_doctype"))
+		frappe.set_user(self.officer)
+		out = get_blocked_email(self.mail)
+		self.assertEqual(
+			(out["name"], out["sender"], out["subject"], out["content"], out["request"]),
+			(self.mail, EMAIL, "About my data", "<p>Please call me</p>", self.request),
+		)
+		self.assertIn("communication_date", out)
+		self.assertIn("sender_full_name", out)
+		self.assertEqual(
+			out["attachments"],
+			[
+				{
+					"name": self.attachment.name,
+					"file_name": "Marisol_letter.txt",
+					"file_size": self.attachment.file_size,
+					"is_private": 1,
+				}
+			],
+		)
+
+	def test_request_is_none_once_its_log_entry_is_gone(self):
+		frappe.db.delete("CRM Erasure Request", {"name": self.request})
+		frappe.set_user(self.officer)
+		self.assertIsNone(get_blocked_email(self.mail)["request"])
+
+	def test_other_roles_are_refused(self):
+		for email, roles in (
+			("blocked.rep@example.com", ["Sales User"]),
+			("blocked.manager@example.com", ["Sales Manager"]),
+			("blocked.admin@example.com", ["System Manager", "Sales Manager"]),
+		):
+			user = make_user(email, roles).name
+			frappe.set_user(user)
+			with self.assertRaises(frappe.PermissionError, msg=email):
+				get_blocked_email(self.mail)
+			with self.assertRaises(frappe.PermissionError, msg=email):
+				download_blocked_email_attachment(self.mail, self.attachment.name)
+			frappe.set_user("Administrator")
+
+	def test_only_unattached_mail_from_a_blocked_sender(self):
+		open_request = make_request(identifiers=[{"kind": "Email", "value": "open.request@example.com"}]).name
+		on_request = self._received("open.request@example.com")
+		self.assertEqual(frappe.db.get_value("Communication", on_request, "reference_name"), open_request)
+		on_lead = self._received(EMAIL)
+		lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Theo", "email": "theo@example.com"}).insert()
+		frappe.db.set_value("Communication", on_lead, {"reference_doctype": "CRM Lead", "reference_name": lead.name})
+		linked = self._received(EMAIL)
+		frappe.get_doc(
+			{
+				"doctype": "Communication Link",
+				"parent": linked,
+				"parenttype": "Communication",
+				"parentfield": "timeline_links",
+				"link_doctype": "CRM Lead",
+				"link_name": lead.name,
+			}
+		).db_insert()
+		not_blocked = self._received("someone.new@example.com")
+		frappe.set_user(self.officer)
+		for label, mail in (
+			("on an open request", on_request),
+			("on a lead", on_lead),
+			("on a timeline", linked),
+			("from an unblocked sender", not_blocked),
+			("missing", "no-such-communication"),
+		):
+			with self.assertRaises(frappe.PermissionError, msg=label):
+				get_blocked_email(mail)
+
+	def test_download_streams_only_the_mails_own_attachment(self):
+		other_mail = self._received(EMAIL)
+		elsewhere = self._attach(other_mail, "other.txt", b"Other mail")
+		frappe.set_user(self.officer)
+		frappe.local.response = frappe._dict()
+		download_blocked_email_attachment(self.mail, self.attachment.name)
+		response = frappe.local.response
+		self.assertEqual(response.type, "download")
+		self.assertEqual(response.filename, "Marisol_letter.txt")
+		content = response.filecontent
+		self.assertEqual(content.encode() if isinstance(content, str) else content, b"Dear Northpine")
+		with self.assertRaises(frappe.PermissionError):
+			download_blocked_email_attachment(self.mail, elsewhere.name)
+		with self.assertRaises(frappe.PermissionError):
+			download_blocked_email_attachment(self.mail, "no-such-file")
+
+	def test_no_blanket_communication_read(self):
+		self.assertFalse(frappe.has_permission("Communication", "read", self.mail, user=self.officer))
+		self.assertFalse(frappe.has_permission("File", "read", self.attachment.name, user=self.officer))

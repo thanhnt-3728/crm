@@ -120,6 +120,6 @@ class TestNotificationsAPI(IntegrationTestCase):
 				"D-1": ("deal", "Deal"),
 				"L-1": ("lead", "Lead"),
 				"PDR-0001": ("CRM Erasure Request", "Erasure Request"),
-				"COMM-1": ("Communication", "Erasure Requests"),
+				"COMM-1": ("Communication", "Erasure Email"),
 			},
 		)

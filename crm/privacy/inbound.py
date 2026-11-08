@@ -4,7 +4,8 @@ Incoming email is never rejected, since that would break mailbox sync. Instead:
 - no lead is created from it;
 - while her request is open, the email is attached to the request;
 - after close (her email is on the do-not-contact list) it is attached to nothing and
-  Compliance is notified.
+  Compliance is notified. Compliance reads it through `crm.privacy.api.get_blocked_email`
+  (`blocked_email` decides which mail that is); there is no general Communication grant.
 
 Nothing here may raise for an ordinary inbound email: an exception in a Communication
 hook makes `EmailAccount.receive` roll the mail back and park it as an Unhandled Email.
@@ -15,6 +16,7 @@ from email.utils import parseaddr
 
 import frappe
 from frappe import _
+from frappe.model.document import Document
 from frappe.query_builder import Order
 
 from crm.privacy.blocking import ErasedPersonError
@@ -100,6 +102,39 @@ def keep_off_timelines(doc, method=None) -> None:
 		doc.set("timeline_links", [])
 
 
+def request_blocking(sender: str | None) -> str | None:
+	"""The request whose do-not-contact entry blocks `sender`, while that request still exists.
+
+	The request log entry is deleted 24 months after its answer; the block is permanent.
+	"""
+	request = blocking_request("Email", _address(sender))
+	return request if request and frappe.db.exists(DOCTYPE, request) else None
+
+
+def blocked_email(name: str | None) -> Document | None:
+	"""The Communication `name` when it is mail that arrived from a do-not-contact address
+	and was attached to nothing (what `route_inbound_email` does after close), else None.
+
+	Judged from stored state only: `flags.erasure_blocked_sender` lives only in memory, and
+	the CRM Notification is just navigation (Compliance users added later get none).
+	"""
+	if not name or not isinstance(name, str):
+		return None
+	row = frappe.db.get_value(
+		"Communication",
+		name,
+		["name", "sent_or_received", "communication_medium", "reference_doctype", "sender"],
+		as_dict=True,
+	)
+	if not row or not _is_inbound_email(row) or row.reference_doctype:
+		return None
+	if frappe.db.exists("Communication Link", {"parenttype": "Communication", "parent": row.name}):
+		return None
+	if not is_blocked("Email", _address(row.sender)):
+		return None
+	return frappe.get_doc("Communication", row.name)
+
+
 def notify_blocked_inbound(doc, method=None) -> None:
 	"""Communication `after_insert`: tell Compliance an email arrived from an erased person.
 
@@ -107,10 +142,7 @@ def notify_blocked_inbound(doc, method=None) -> None:
 	a savepoint instead of raised, so the email is still stored."""
 	if not doc.flags.erasure_blocked_sender:
 		return
-	request = blocking_request("Email", _address(doc.sender))
-	# The request log entry is deleted 24 months after its answer; the block is permanent.
-	if request and not frappe.db.exists(DOCTYPE, request):
-		request = None
+	request = request_blocking(doc.sender)
 
 	save_point = "erasure_blocked_inbound"
 	frappe.db.savepoint(save_point)

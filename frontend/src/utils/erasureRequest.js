@@ -77,6 +77,13 @@ export function isCompleteDate(value) {
   )
 }
 
+// An attachment of mail from an erased person. Compliance cannot read the mail's
+// files directly, so they download through this endpoint.
+export function blockedAttachmentUrl(email, file) {
+  const query = `email=${encodeURIComponent(email)}&file=${encodeURIComponent(file)}`
+  return `/api/method/crm.privacy.api.download_blocked_email_attachment?${query}`
+}
+
 export function confirmationMatches(typed, requestName) {
   return (typed || '').trim() === requestName
 }

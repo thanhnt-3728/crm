@@ -141,6 +141,12 @@ const routes = [
     props: true,
   },
   {
+    path: '/erasure-emails/:emailId',
+    name: 'Erasure Email',
+    component: () => import('@/pages/ErasureEmail.vue'),
+    props: true,
+  },
+  {
     path: '/welcome',
     name: 'Welcome',
     component: () => import('@/pages/Welcome.vue'),

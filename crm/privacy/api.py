@@ -13,6 +13,7 @@ from crm.privacy import lifecycle
 from crm.privacy.deadlines import days_left
 from crm.privacy.hold import apply_hold
 from crm.privacy.identifiers import normalize_identifier
+from crm.privacy.inbound import blocked_email, request_blocking
 from crm.privacy.matching import (
 	MANUAL_REASON,
 	contact_identifiers,
@@ -424,6 +425,59 @@ def decline_request(name: str, reason: str) -> dict:
 	doc.decline_reason = reason
 	doc.save()
 	return get_request(name)
+
+
+def _blocked_email(name: str):
+	"""The blocked mail `name`, for a Compliance user. Anything else gets the same refusal,
+	which never names the sender."""
+	doc = blocked_email(name) if is_compliance() else None
+	if not doc:
+		frappe.throw(_("This email is not available"), frappe.PermissionError)
+	return doc
+
+
+@frappe.whitelist()
+def get_blocked_email(name: str) -> dict:
+	"""Mail that arrived from an erased person after her request closed. Compliance only.
+
+	This is the only way to read it: Compliance has no general read on Communication, and
+	the mail is attached to no record.
+	"""
+	doc = _blocked_email(name)
+	return {
+		"name": doc.name,
+		"sender": doc.sender,
+		"sender_full_name": doc.sender_full_name,
+		"communication_date": doc.communication_date,
+		"subject": doc.subject,
+		"content": doc.content,
+		"request": request_blocking(doc.sender),
+		"attachments": frappe.get_all(
+			"File",
+			filters={"attached_to_doctype": "Communication", "attached_to_name": doc.name, "is_folder": 0},
+			fields=["name", "file_name", "file_size", "is_private"],
+			order_by="creation asc",
+		),
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def download_blocked_email_attachment(email: str, file: str) -> None:
+	"""Stream one attachment of a blocked mail. Compliance only.
+
+	Needed because File permission defers a private file to the Communication it is
+	attached to, which Compliance cannot read.
+	"""
+	doc = _blocked_email(email)
+	row = frappe.db.get_value(
+		"File", file, ["name", "attached_to_doctype", "attached_to_name", "is_folder"], as_dict=True
+	)
+	if not row or row.is_folder or (row.attached_to_doctype, row.attached_to_name) != ("Communication", doc.name):
+		frappe.throw(_("This email is not available"), frappe.PermissionError)
+	attachment = frappe.get_doc("File", row.name)
+	frappe.local.response.filename = attachment.file_name
+	frappe.local.response.filecontent = attachment.get_content()
+	frappe.local.response.type = "download"
 
 
 @frappe.whitelist()
