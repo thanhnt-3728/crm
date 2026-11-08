@@ -173,12 +173,26 @@ def _queue_reindex(after_commit: list[Callable], doctype: str, names) -> None:
 		after_commit.append(partial(_reindex, doctype, name))
 
 
+def flush_search_queue() -> None:
+	"""Write out the queued global search entries now.
+
+	An entry queued (in Redis) before the erasure still holds her values; synced after a
+	row is dropped here it would re-create it, so the queue is flushed before deleting.
+	"""
+	from frappe.utils.global_search import sync_global_search
+
+	# A failure (Redis down) must not stop the caller from dropping the rows.
+	with suppress(Exception):
+		sync_global_search()
+
+
 def _drop_global_search(doctype: str, names: list[str]) -> None:
 	"""After the commit: remove the rows' global search entries (subject, sender…).
 
 	set_value does not refresh `__global_search`, and it is MyISAM, outside the
 	transaction, so this runs only once the erasure has committed.
 	"""
+	flush_search_queue()
 	for start in range(0, len(names), 500):
 		frappe.db.delete("__global_search", {"doctype": doctype, "name": ["in", names[start : start + 500]]})
 

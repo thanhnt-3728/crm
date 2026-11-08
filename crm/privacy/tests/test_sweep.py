@@ -44,6 +44,11 @@ class TestSweep(IntegrationTestCase):
 		log_error = patch("frappe.log_error")
 		log_error.start()
 		self.addCleanup(log_error.stop)
+		# The real sync would write entries queued by earlier, rolled-back tests into
+		# __global_search (MyISAM, outside the transaction).
+		sync = patch("frappe.utils.global_search.sync_global_search")
+		sync.start()
+		self.addCleanup(sync.stop)
 		self.paths: list[str] = []
 		self.m = make_marisol()
 		self.officer = make_compliance_user()
@@ -302,6 +307,26 @@ class TestSweep(IntegrationTestCase):
 			frappe.db.after_commit.run()
 			self.assertFalse(frappe.db.exists("__global_search", {"doctype": "Communication", "name": c}))
 			self.assertFalse(frappe.db.exists("__global_search", {"content": ["like", "%sierrafoothills%"]}))
+		finally:
+			frappe.db.delete("__global_search", {"doctype": "Communication", "name": c})
+
+	def test_search_entry_queued_before_the_erasure_cannot_recreate_the_row(self):
+		from frappe.utils.global_search import sync_value
+
+		c = make_communication(
+			sender=MARISOL_EMAIL, recipients="tyler@northpine.example", subject="Quote", sent_or_received="Received"
+		)
+		stale = {"doctype": "Communication", "name": c, "published": 0, "title": "Quote", "route": ""}
+		stale["content"] = f"Subject: Quote ||| Sender: {MARISOL_EMAIL}"
+		try:
+			run_erasure(self.name, self.officer)
+			# What the scheduler's sync would write for an entry queued before the erasure.
+			with patch(
+				"frappe.utils.global_search.sync_global_search", side_effect=lambda: sync_value(stale)
+			) as sync:
+				frappe.db.after_commit.run()
+			sync.assert_called()
+			self.assertFalse(frappe.db.exists("__global_search", {"doctype": "Communication", "name": c}))
 		finally:
 			frappe.db.delete("__global_search", {"doctype": "Communication", "name": c})
 

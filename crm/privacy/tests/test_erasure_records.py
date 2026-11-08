@@ -25,6 +25,11 @@ class TestErasureRecords(IntegrationTestCase):
 		log_error = patch("frappe.log_error")
 		log_error.start()
 		self.addCleanup(log_error.stop)
+		# The real sync would write entries queued by earlier, rolled-back tests into
+		# __global_search (MyISAM, outside the transaction).
+		sync = patch("frappe.utils.global_search.sync_global_search")
+		sync.start()
+		self.addCleanup(sync.stop)
 		if not frappe.db.exists("CRM Lost Reason", "Other"):
 			frappe.get_doc({"doctype": "CRM Lost Reason", "lost_reason": "Other"}).insert()
 		make_user("rep@example.com", ["Sales User"])
@@ -419,6 +424,23 @@ class TestErasureRecords(IntegrationTestCase):
 		finally:
 			for name in (old, new):
 				frappe.db.delete("__global_search", {"doctype": "Contact", "name": name})
+
+	def test_search_entry_queued_for_old_contact_name_is_flushed_first(self):
+		from frappe.utils.global_search import sync_value
+
+		old = self.m.contact
+		stale = {"doctype": "Contact", "name": old, "content": "x", "published": 0, "title": old, "route": ""}
+		try:
+			run_erasure(self.name, self.officer)
+			with (
+				patch("frappe.utils.global_search.sync_global_search", side_effect=lambda: sync_value(stale)) as sync,
+				patch("frappe.utils.global_search.update_global_search"),
+			):
+				frappe.db.after_commit.run()
+			sync.assert_called()
+			self.assertFalse(frappe.db.exists("__global_search", {"doctype": "Contact", "name": old}))
+		finally:
+			frappe.db.delete("__global_search", {"doctype": "Contact", "name": old})
 
 	def test_failure_text_carries_no_personal_data(self):
 		lead = frappe.db.get_value("CRM Lead", self.m.lead, ["lead_name", "email", "mobile_no"], as_dict=True)

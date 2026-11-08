@@ -31,7 +31,7 @@ from crm.privacy.identifiers import normalize_identifier, personal_fields
 from crm.privacy.matching import like_escape, phone_rows
 from crm.privacy.plan import ErasurePlan, plan_erasure
 from crm.privacy.rules import DEAL_FIELD_SOURCES, deal_fields_to_blank, erased_person, scrub_identifiers
-from crm.privacy.sweep import guarded, sweep_activities
+from crm.privacy.sweep import flush_search_queue, guarded, sweep_activities
 
 DOCTYPE = "CRM Erasure Request"
 LEAD = "CRM Lead"
@@ -404,6 +404,7 @@ def _rename(doctype: str, old: str, new: str, after_commit: list[Callable]) -> N
 def _replace_search_entry(doctype: str, old: str, new: str) -> None:
 	from frappe.utils.global_search import update_global_search
 
+	flush_search_queue()  # an entry queued under the old name would re-create its row
 	frappe.db.delete("__global_search", {"doctype": doctype, "name": old})
 	if frappe.db.exists(doctype, new):
 		update_global_search(frappe.get_doc(doctype, new))
