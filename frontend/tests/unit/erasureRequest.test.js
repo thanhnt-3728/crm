@@ -3,6 +3,7 @@ import {
   confirmationMatches,
   changedFields,
   daysLeftLabel,
+  isCompleteDate,
   matchRoute,
   mergeForm,
   statusTheme,
@@ -96,6 +97,24 @@ describe('mergeForm', () => {
     const form = { requester_name: '', original_message: '' }
     const merged = mergeForm(form, {}, { requester_name: null }, keys)
     expect(merged).toEqual({ requester_name: '', original_message: '' })
+  })
+})
+
+describe('isCompleteDate', () => {
+  it('accepts a full date from 2000 on', () => {
+    expect(isCompleteDate('2026-11-04')).toBe(true)
+    expect(isCompleteDate('2000-01-01')).toBe(true)
+  })
+  it('refuses a half-typed or early year', () => {
+    expect(isCompleteDate('0002-11-04')).toBe(false)
+    expect(isCompleteDate('1999-12-31')).toBe(false)
+  })
+  it('refuses partial, malformed and impossible dates', () => {
+    expect(isCompleteDate('2026-1-4')).toBe(false)
+    expect(isCompleteDate('2026-02-30')).toBe(false)
+    expect(isCompleteDate('2026-13-01')).toBe(false)
+    expect(isCompleteDate('')).toBe(false)
+    expect(isCompleteDate(null)).toBe(false)
   })
 })
 

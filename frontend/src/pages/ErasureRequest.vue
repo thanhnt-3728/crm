@@ -231,14 +231,12 @@
               "
             />
             <FormControl
+              v-model="acknowledgedOn"
               type="date"
               class="w-48"
               :label="__('Acknowledged on')"
-              :modelValue="doc.acknowledged_on || ''"
               :disabled="!can.manage_checklist || busy"
-              @update:modelValue="
-                (value) => save({ acknowledged_on: value || null })
-              "
+              @change="saveAcknowledgedOn"
             />
           </div>
         </section>
@@ -312,6 +310,7 @@ import { formatDate } from '@/utils'
 import {
   changedFields,
   daysLeftLabel,
+  isCompleteDate,
   mergeForm,
   statusTheme,
 } from '@/utils/erasureRequest'
@@ -462,6 +461,30 @@ async function run(method, params) {
 
 function save(values) {
   return run('crm.privacy.api.save_request', { values })
+}
+
+// The Acknowledged-on input keeps its own value and saves only a complete date
+// when it is committed, so a half-typed year (0002-…) never reaches the server.
+const acknowledgedOn = ref('')
+watch(
+  () => doc.value.acknowledged_on,
+  (value) => {
+    acknowledgedOn.value = value || ''
+  },
+  { immediate: true },
+)
+
+async function saveAcknowledgedOn(value) {
+  const saved = doc.value.acknowledged_on || ''
+  if ((value || '') === saved) return
+  if (value && !isCompleteDate(value)) {
+    acknowledgedOn.value = saved
+    toast.error(__('Enter a full date, from the year 2000 on'))
+    return
+  }
+  if (!(await save({ acknowledged_on: value || null }))) {
+    acknowledgedOn.value = saved
+  }
 }
 
 function saveForm() {

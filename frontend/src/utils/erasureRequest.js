@@ -62,6 +62,21 @@ export function mergeForm(form, baseline, doc, keys) {
   return merged
 }
 
+// A complete YYYY-MM-DD date from the year 2000 on. A half-typed year (0002-…)
+// or an impossible day (2026-02-30) is not.
+export function isCompleteDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''))
+  if (!match) return false
+  const [year, month, day] = match.slice(1).map(Number)
+  if (year < 2000) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
+}
+
 export function confirmationMatches(typed, requestName) {
   return (typed || '').trim() === requestName
 }
