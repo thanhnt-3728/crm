@@ -538,6 +538,21 @@ class TestSweep(IntegrationTestCase):
 	def test_sweep_is_in_the_erasure_steps(self):
 		self.assertEqual(erasure.STEPS[:2], [erasure.erase_records, sweep_activities])
 
+	def test_failing_after_commit_callback_does_not_stop_the_others(self):
+		f = self._save_file("passport.txt", b"q", "CRM Lead", self.m.lead)
+		path = f.get_full_path()
+		# The contact rename queues a search-index update before the sweep queues the disk removal.
+		with patch.object(erasure, "_replace_search_entry", side_effect=RuntimeError(f"no {EMAIL}")):
+			run_erasure(self.name, self.officer)
+			with patch("frappe.log_error") as log_error:
+				frappe.db.after_commit.run()  # does not raise
+		self.assertFalse(os.path.exists(path))
+		log_error.assert_called_once()
+		self.assertEqual(
+			log_error.call_args.kwargs.get("message"), "A clean-up step after the erasure failed."
+		)
+		self.assertNotIn("marisol", repr(log_error.call_args).lower())
+
 	def test_disk_removal_failure_logs_a_fixed_message(self):
 		# Without a message, log_error stores the traceback, whose OSError text holds the path.
 		path = frappe.get_site_path("private", "files", "Marisol_Vega_ID.pdf")

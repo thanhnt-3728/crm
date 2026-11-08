@@ -291,6 +291,34 @@ class TestErasureRecords(IntegrationTestCase):
 		self.assertEqual(log_error.call_args.kwargs["title"], f"Erasure failed for {self.name}")
 		self.assertEqual(log_error.call_args.kwargs["message"], r.erasure_error)
 
+	def test_failed_status_committed_before_logging_and_log_failure_ignored(self):
+		calls = []
+
+		def boom(*a):
+			raise RuntimeError("x")
+
+		def failing_log(*args, **kwargs):
+			calls.append("log")
+			raise RuntimeError("the log store is unavailable")
+
+		with (
+			patch.object(erasure, "STEPS", [erasure.erase_records, boom]),
+			patch.object(erasure, "_commit", lambda: calls.append("commit")),
+			patch("frappe.log_error", side_effect=failing_log),
+		):
+			run_erasure(self.name, self.officer)  # does not raise
+		self.assertEqual(calls, ["commit", "log"])
+		r = frappe.db.get_value("CRM Erasure Request", self.name, ["status", "erasure_status"], as_dict=True)
+		self.assertEqual((r.status, r.erasure_status), ("Awaiting Sign-off", "Failed"))
+
+	def test_request_no_longer_awaiting_sign_off_stops_waiting(self):
+		frappe.db.set_value("CRM Erasure Request", self.name, {"status": "On Hold", "erasure_status": "Queued"})
+		run_erasure(self.name, self.officer)
+		self.assertEqual(
+			frappe.db.get_value("CRM Erasure Request", self.name, ["status", "erasure_status"]), ("On Hold", "")
+		)
+		self.assertEqual(frappe.db.get_value("CRM Lead", self.m.lead, "email"), MARISOL_EMAIL)
+
 	def test_no_modified_bump_and_no_new_versions(self):
 		records = (("CRM Lead", self.m.lead), ("CRM Deal", self.m.won_deal), ("CRM Deal", self.m.open_deal))
 		before = {record: frappe.db.get_value(*record, "modified") for record in records}

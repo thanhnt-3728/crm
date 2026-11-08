@@ -15,6 +15,7 @@ confirmed leads, contacts and the deals she is still on.
 import os
 import re
 from collections.abc import Callable
+from contextlib import suppress
 from email.utils import getaddresses
 from functools import partial
 
@@ -137,6 +138,26 @@ def _sweep_text(
 
 def _her_address(header: str | None, emails: set[str]) -> bool:
 	return any(normalize_email(addr) in emails for _name, addr in getaddresses([header or ""]) if addr)
+
+
+def _run_guarded(request: str, fn: Callable) -> None:
+	try:
+		fn()
+	except Exception:
+		# A fixed message keeps the traceback (paths, her values in locals) out of the Error
+		# Log; nothing escapes, so frappe still runs the callbacks queued after this one.
+		with suppress(Exception):
+			frappe.log_error(
+				title=f"Erasure {request}: a clean-up step after the erasure failed",
+				message="A clean-up step after the erasure failed.",
+				reference_doctype=DOCTYPE,
+				reference_name=request,
+			)
+
+
+def guarded(request: str, fn: Callable) -> Callable:
+	"""`fn` wrapped for `frappe.db.after_commit`: a failure is logged and the next callback still runs."""
+	return partial(_run_guarded, request, fn)
 
 
 def _reindex(doctype: str, name: str) -> None:

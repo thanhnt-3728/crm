@@ -31,7 +31,7 @@ from crm.privacy.identifiers import normalize_identifier, personal_fields
 from crm.privacy.matching import like_escape, phone_rows
 from crm.privacy.plan import ErasurePlan, plan_erasure
 from crm.privacy.rules import DEAL_FIELD_SOURCES, deal_fields_to_blank, erased_person, scrub_identifiers
-from crm.privacy.sweep import sweep_activities
+from crm.privacy.sweep import guarded, sweep_activities
 
 DOCTYPE = "CRM Erasure Request"
 LEAD = "CRM Lead"
@@ -70,6 +70,10 @@ def run_erasure(request: str, approver: str) -> None:
 	"""Erase everything the request's plan lists, or nothing at all."""
 	doc = frappe.get_doc(DOCTYPE, request)
 	if doc.status != "Awaiting Sign-off":
+		# Nothing to erase. Clear Queued so the request page stops waiting for the job.
+		if doc.erasure_status == "Queued":
+			frappe.db.set_value(DOCTYPE, request, "erasure_status", "")
+			_commit()
 		return
 	frappe.db.savepoint("erasure")
 	# Savepoint rollback leaves frappe's commit callbacks and realtime queue alone, so
@@ -105,7 +109,8 @@ def run_erasure(request: str, approver: str) -> None:
 		_record_failure(request, error, pending)
 		return
 	for fn in after_commit:
-		frappe.db.after_commit.add(fn)
+		# One failing callback must not skip the rest (disk deletes) or raise into the job runner.
+		frappe.db.after_commit.add(guarded(request, fn))
 	_commit()
 
 
@@ -130,13 +135,16 @@ def _record_failure(request: str, error: str, pending: dict) -> None:
 
 	try:
 		frappe.db.set_value(DOCTYPE, request, {"erasure_status": "Failed", "erasure_error": error})
-		frappe.log_error(
-			title=f"Erasure failed for {request}", message=error, reference_doctype=DOCTYPE, reference_name=request
-		)
 		_commit()
 	except Exception:
 		# `from None` keeps the original traceback, which may hold personal data, out of the job log.
 		raise ErasureFailed(f"Erasure failed for {request} and the failure could not be recorded") from None
+	# Logged only after the commit: the Error Log is a separate store, and failing to write it
+	# must not lose the Failed status (the request would show "Erasing…" for ever).
+	with suppress(Exception):
+		frappe.log_error(
+			title=f"Erasure failed for {request}", message=error, reference_doctype=DOCTYPE, reference_name=request
+		)
 
 
 def _commit() -> None:
