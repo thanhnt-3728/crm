@@ -4,11 +4,14 @@ Notices name the request number only. The one exception is the On Hold notice to
 owner (see `crm.privacy.hold`), which names the contact.
 """
 
+from collections.abc import Callable
+from contextlib import suppress
+
 import frappe
 from frappe.utils import getdate
 
 from crm.privacy.deadlines import days_left, reminder_dates
-from crm.privacy.identifiers import compliance_users
+from crm.privacy.identifiers import compliance_users, users_with_role
 
 DOCTYPE = "CRM Erasure Request"
 
@@ -91,13 +94,53 @@ def _remind(request, today) -> None:
 
 	if not request.acknowledgment_sent and not request.ack_reminder_sent and today >= due["acknowledgment"]:
 		subject = f"Erasure request {request.name}: acknowledge by {request.acknowledge_by}"
-		_send_once(request.name, "ack_reminder_sent", compliance_users(), subject)
+		_send_safely(request.name, "ack_reminder_sent", compliance_users, subject)
 
 	if not request.day30_reminder_sent and today >= due["day_30"]:
-		_send_once(request.name, "day30_reminder_sent", compliance_users(), text)
+		_send_safely(request.name, "day30_reminder_sent", compliance_users, text)
 
 	if not request.day40_alert_sent and today >= due["day_40"]:
-		_send_once(request.name, "day40_alert_sent", _day_40_recipients(), text)
+		_send_safely(request.name, "day40_alert_sent", _day_40_recipients, text)
+
+
+def _send_safely(request: str, flag: str, recipients: Callable[[], list[str]], subject: str) -> None:
+	"""Send one reminder. A failure is logged (by request number only) and the next reminder
+	still goes out, so a failing acknowledgment reminder never holds back the day-40 alert."""
+	try:
+		_send_once(request, flag, _with_fallback(request, recipients()), subject)
+	except Exception:
+		# A fixed message keeps the traceback (and its local variables) out of the Error Log.
+		frappe.log_error(
+			title=f"Erasure reminder failed for {request}",
+			message="A reminder could not be sent. It is retried on the next daily run.",
+			reference_doctype=DOCTYPE,
+			reference_name=request,
+		)
+
+
+def _with_fallback(request: str, users: list[str]) -> list[str]:
+	"""`users`, or the enabled System Managers when there is nobody to remind.
+
+	A missing Compliance team must not let a deadline pass unnoticed, so the reminder goes
+	to the System Managers instead, and the gap is logged.
+	"""
+	if users:
+		return users
+	managers = users_with_role("System Manager")
+	with suppress(Exception):
+		frappe.log_error(
+			title=f"Erasure request {request}: no Compliance user to remind",
+			message=(
+				"No enabled Compliance user (or Head of Compliance) exists, so the reminder went to the "
+				"System Managers. Give someone the Compliance role."
+				if managers
+				else "No enabled Compliance user or System Manager exists, so the reminder was not sent. "
+				"It is retried on the next daily run."
+			),
+			reference_doctype=DOCTYPE,
+			reference_name=request,
+		)
+	return managers
 
 
 def _day_40_recipients() -> list[str]:
@@ -111,8 +154,8 @@ def _day_40_recipients() -> list[str]:
 def _send_once(request: str, flag: str, users: list[str], subject: str) -> None:
 	"""Notify, then set the flag, as one unit: a failure in between undoes both.
 
-	Nothing is sent and no flag is set when there is nobody to notify, so the reminder
-	goes out once a Compliance user exists.
+	Nothing is sent and no flag is set when there is nobody to notify (not even a System
+	Manager), so the reminder goes out once someone exists.
 	"""
 	if not users:
 		return

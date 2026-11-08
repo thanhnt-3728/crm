@@ -126,10 +126,15 @@ def add_do_not_contact(kind: Literal["Email", "Phone"], value: str | None, reque
 
 def compliance_users() -> list[str]:
 	"""Enabled users holding the Compliance role (Administrator and Guest excluded)."""
+	return users_with_role("Compliance")
+
+
+def users_with_role(role: str) -> list[str]:
+	"""Enabled users holding `role` (Administrator and Guest excluded)."""
 	holders = frappe.get_all(
 		"Has Role",
 		filters={
-			"role": "Compliance",
+			"role": role,
 			"parenttype": "User",
 			"parent": ["not in", ["Administrator", "Guest"]],
 		},

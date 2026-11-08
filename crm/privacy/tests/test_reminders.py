@@ -87,6 +87,45 @@ class TestReminders(IntegrationTestCase):
 		send_reminders(getdate("2026-12-06"))
 		self.assertEqual(self.count(self.officer), 0)
 
+	def test_failing_reminder_does_not_block_the_later_ones(self):
+		real_notify = reminders.notify
+
+		def flaky(users, subject, request, *args, **kwargs):
+			if "acknowledge by" in subject:
+				raise RuntimeError("boom")
+			return real_notify(users, subject, request, *args, **kwargs)
+
+		with patch("crm.privacy.reminders.notify", flaky), patch("frappe.log_error") as log_error:
+			send_reminders(getdate("2026-12-06"))
+		self.assertFalse(self.flag("ack_reminder_sent"))
+		self.assertTrue(self.flag("day30_reminder_sent"))
+		self.assertTrue(self.flag("day40_alert_sent"))
+		self.assertEqual(self.count(self.officer), 2)  # day 30, and day 40 (no head set)
+		log_error.assert_called_once()
+		self.assertEqual(log_error.call_args.kwargs["title"], f"Erasure reminder failed for {self.r.name}")
+		self.assertTrue(log_error.call_args.kwargs.get("message"))
+
+	def test_no_compliance_user_falls_back_to_system_managers(self):
+		manager = make_user("privacy-sysman@example.com", ["System Manager"]).name
+		disabled = make_user("privacy-sysman-off@example.com", ["System Manager"]).name
+		frappe.db.set_value("User", disabled, "enabled", 0)
+		frappe.db.set_single_value("CRM Privacy Settings", "head_of_compliance", None)
+		with (
+			patch("crm.privacy.reminders.compliance_users", return_value=[]),
+			patch("frappe.log_error") as log_error,
+		):
+			send_reminders(getdate("2026-11-04"))
+		self.assertEqual(self.count(manager), 1)
+		self.assertEqual(self.count(disabled), 0)
+		self.assertEqual(self.count("Administrator"), 0)
+		self.assertEqual(self.count(self.officer), 0)
+		self.assertTrue(self.flag("ack_reminder_sent"))
+		log_error.assert_called_once()
+		kwargs = log_error.call_args.kwargs
+		self.assertEqual(kwargs["title"], f"Erasure request {self.r.name}: no Compliance user to remind")
+		self.assertTrue(kwargs.get("message"))
+		self.assertEqual(kwargs["reference_name"], self.r.name)
+
 	def test_one_failing_request_does_not_stop_the_others(self):
 		other = make_request(date_received="2026-10-26")
 		real_notify = reminders.notify
