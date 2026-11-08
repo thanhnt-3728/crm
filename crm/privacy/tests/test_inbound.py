@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import frappe
 from frappe.email.receive import InboundMail
 from frappe.tests import IntegrationTestCase
@@ -20,6 +22,24 @@ class TestInbound(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
 		frappe.db.rollback()
+
+	def test_failed_compliance_notice_logs_a_fixed_message(self):
+		make_compliance_user()
+		add_do_not_contact("Email", EMAIL, "PDR-0001")
+		with (
+			patch("crm.privacy.inbound.notify", side_effect=OSError(f"cannot notify about {EMAIL}")),
+			patch("frappe.log_error") as log_error,
+		):
+			c = make_communication(
+				sender=EMAIL,
+				sent_or_received="Received",
+				communication_medium="Email",
+				email_account=make_email_account(),
+			)
+		self.assertTrue(frappe.db.exists("Communication", c))
+		log_error.assert_called_once()
+		self.assertEqual(log_error.call_args.kwargs.get("message"), "Compliance could not be notified.")
+		self.assertNotIn("marisol", repr(log_error.call_args).lower())
 
 	def test_open_request_receives_mail_and_no_lead(self):
 		r = make_request(identifiers=[{"kind": "Email", "value": "marisol@sierrafoothills.example"}])

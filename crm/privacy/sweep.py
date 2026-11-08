@@ -315,9 +315,11 @@ def _remove_from_disk(request: str, file_url: str, path: str) -> None:
 	except FileNotFoundError:
 		pass
 	except OSError:
-		# The path may hold her name, so it stays out of the log. Other callbacks still run.
+		# Without a message log_error would store the traceback, whose OSError text holds the
+		# path (often her name). The fixed message keeps it out. Other callbacks still run.
 		frappe.log_error(
 			title=f"Erasure {request}: a file could not be removed from disk",
+			message="A file could not be removed from disk.",
 			reference_doctype=DOCTYPE,
 			reference_name=request,
 		)

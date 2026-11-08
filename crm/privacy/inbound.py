@@ -124,8 +124,11 @@ def notify_blocked_inbound(doc, method=None) -> None:
 		)
 	except Exception:
 		frappe.db.rollback(save_point=save_point)
+		# A fixed message: without one the traceback (and its local variables, which hold
+		# the sender) would be stored in the Error Log.
 		frappe.log_error(
 			title="Could not notify Compliance of an email from an erased person",
+			message="Compliance could not be notified.",
 			reference_doctype="Communication",
 			reference_name=doc.name,
 		)

@@ -10,7 +10,7 @@ from crm.fcrm.doctype.crm_deal.crm_deal import remove_contact
 from crm.privacy import erasure
 from crm.privacy.erasure import run_erasure
 from crm.privacy.reminders import notify
-from crm.privacy.sweep import sweep_activities
+from crm.privacy.sweep import _remove_from_disk, sweep_activities
 from crm.privacy.tests.factories import (
 	MARISOL_EMAIL,
 	make_call_log,
@@ -537,3 +537,17 @@ class TestSweep(IntegrationTestCase):
 
 	def test_sweep_is_in_the_erasure_steps(self):
 		self.assertEqual(erasure.STEPS[:2], [erasure.erase_records, sweep_activities])
+
+	def test_disk_removal_failure_logs_a_fixed_message(self):
+		# Without a message, log_error stores the traceback, whose OSError text holds the path.
+		path = frappe.get_site_path("private", "files", "Marisol_Vega_ID.pdf")
+		with (
+			patch("crm.privacy.sweep._in_use", return_value=False),
+			patch("crm.privacy.sweep.os.remove", side_effect=PermissionError(13, "Permission denied", path)),
+			patch("frappe.log_error") as log_error,
+		):
+			_remove_from_disk(self.name, "/private/files/Marisol_Vega_ID.pdf", path)
+		log_error.assert_called_once()
+		kwargs = log_error.call_args.kwargs
+		self.assertEqual(kwargs.get("message"), "A file could not be removed from disk.")
+		self.assertNotIn("marisol", repr((log_error.call_args.args, kwargs)).lower())
