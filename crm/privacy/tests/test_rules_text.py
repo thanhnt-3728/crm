@@ -27,7 +27,9 @@ class TestRulesText(UnitTestCase):
 	def test_email_only_matches_as_a_whole_address(self):
 		text = "a xa@b.example and a@b.example.org"
 		self.assertEqual(scrub_identifiers(text, {"a@b.example"}, set(), "X"), text)
-		self.assertEqual(scrub_identifiers("Mail A@B.example, thanks", {"a@b.example"}, set(), "X"), "Mail X, thanks")
+		self.assertEqual(
+			scrub_identifiers("Mail A@B.example, thanks", {"a@b.example"}, set(), "X"), "Mail X, thanks"
+		)
 		self.assertEqual(scrub_identifiers("<a@b.example>", {"a@b.example"}, set(), "X"), "<X>")
 
 	def test_phone_without_valid_form_is_still_scrubbed(self):

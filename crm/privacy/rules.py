@@ -10,7 +10,6 @@ import phonenumbers
 
 from crm.privacy.identifiers import PHONE_REGION, normalize_email, normalize_identifier
 
-
 # A confirmed email matches only as a whole address: not glued to a preceding address
 # character, and not continued by a longer name or domain (a@b.example.org, a@b.example-x).
 _EMAIL_START = r"(?<![\w.+%-])"
@@ -69,7 +68,17 @@ DEFAULT_PERSONAL_FIELDS: dict[str, list[str]] = {
 
 # Name and identifier fields an erasure always scrubs, whatever the settings list says.
 _ALWAYS_ERASED = frozenset(
-	{"first_name", "middle_name", "last_name", "full_name", "lead_name", "email", "email_id", "mobile_no", "phone"}
+	{
+		"first_name",
+		"middle_name",
+		"last_name",
+		"full_name",
+		"lead_name",
+		"email",
+		"email_id",
+		"mobile_no",
+		"phone",
+	}
 )
 REQUIRED_PERSONAL_FIELDS: dict[str, list[str]] = {
 	document_type: [fieldname for fieldname in fieldnames if fieldname in _ALWAYS_ERASED]
@@ -112,9 +121,7 @@ def erased_file(request: str) -> str:
 	return f"File erased {request}"
 
 
-def scrub_identifiers(
-	text: str | None, emails: set[str], phones: set[str], placeholder: str
-) -> str:
+def scrub_identifiers(text: str | None, emails: set[str], phones: set[str], placeholder: str) -> str:
 	"""Replace the given emails (case-insensitive) and phone numbers (any format) in `text`.
 
 	`emails` and `phones` are already normalized. All spans are located in the original
@@ -133,7 +140,9 @@ def scrub_identifiers(
 			spans.extend(m.span() for m in re.finditer(pattern, text, flags=re.IGNORECASE))
 
 	if phones:
-		for match in phonenumbers.PhoneNumberMatcher(text, PHONE_REGION, leniency=phonenumbers.Leniency.POSSIBLE):
+		for match in phonenumbers.PhoneNumberMatcher(
+			text, PHONE_REGION, leniency=phonenumbers.Leniency.POSSIBLE
+		):
 			if normalize_identifier("Phone", match.raw_string) in phones:
 				spans.append((match.start, match.end))
 

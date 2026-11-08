@@ -55,7 +55,11 @@ class TestPrivacySettings(IntegrationTestCase):
 		after_migrate()
 		frappe.db.delete(
 			"CRM Personal Field",
-			{"parent": "CRM Privacy Settings", "document_type": "CRM Lead", "fieldname": ["in", ["email", "phone"]]},
+			{
+				"parent": "CRM Privacy Settings",
+				"document_type": "CRM Lead",
+				"fieldname": ["in", ["email", "phone"]],
+			},
 		)
 		listed = personal_fields()
 		self.assertTrue({"first_name", "lead_name", "email", "mobile_no", "phone"} <= listed["CRM Lead"])

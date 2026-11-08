@@ -65,13 +65,17 @@ class TestErasureRequest(IntegrationTestCase):
 		r = make_request(requester_name="M")
 		self.assertEqual(access_level(r, "rep@example.com"), "full")
 		self.assertIsNone(access_level(r, "other@example.com"))
-		self.assertFalse(frappe.has_permission("CRM Erasure Request", "read", r.name, user="other@example.com"))
+		self.assertFalse(
+			frappe.has_permission("CRM Erasure Request", "read", r.name, user="other@example.com")
+		)
 		frappe.db.set_value("CRM Erasure Request", r.name, "status", "Awaiting Sign-off")
 		r.reload()
 		self.assertEqual(access_level(r, "rep@example.com"), "summary")
 		self.assertFalse(frappe.has_permission("CRM Erasure Request", "read", r.name, user="rep@example.com"))
 		self.assertEqual(access_level(r, "mgr@example.com"), "full")
-		self.assertFalse(frappe.has_permission("CRM Erasure Request", "write", r.name, user="mgr@example.com"))
+		self.assertFalse(
+			frappe.has_permission("CRM Erasure Request", "write", r.name, user="mgr@example.com")
+		)
 		self.assertEqual(access_level(r, officer), "full")
 
 	def test_has_permission_matrix(self):
@@ -81,7 +85,10 @@ class TestErasureRequest(IntegrationTestCase):
 		frappe.set_user("rep2@example.com")
 		r = make_request()
 		frappe.set_user("Administrator")
-		check = lambda ptype, user: frappe.has_permission("CRM Erasure Request", ptype, r.name, user=user)
+
+		def check(ptype, user):
+			return frappe.has_permission("CRM Erasure Request", ptype, r.name, user=user)
+
 		self.assertTrue(check("read", "rep2@example.com"))
 		self.assertTrue(check("write", "rep2@example.com"))
 		self.assertTrue(check("read", "mgr2@example.com"))
@@ -138,7 +145,11 @@ class TestErasureRequestWriteRules(IntegrationTestCase):
 			r.save()
 
 	def test_logger_cannot_set_protected_fields(self):
-		for field, value in (("approved_by", "Administrator"), ("status", "Erased"), ("outcome", "Completed")):
+		for field, value in (
+			("approved_by", "Administrator"),
+			("status", "Erased"),
+			("outcome", "Completed"),
+		):
 			r = self._logger_request()
 			r.set(field, value)
 			with self.assertRaises(frappe.PermissionError, msg=field):

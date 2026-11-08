@@ -99,7 +99,9 @@ class TestErasureRecords(IntegrationTestCase):
 
 		with patch.object(erasure, "STEPS", [erasure.erase_records, boom]):
 			run_erasure(self.name, self.officer)
-		self.assertEqual(frappe.db.get_value("CRM Lead", self.m.lead, "email"), "Marisol@SierraFoothills.example")
+		self.assertEqual(
+			frappe.db.get_value("CRM Lead", self.m.lead, "email"), "Marisol@SierraFoothills.example"
+		)
 		self.assertTrue(frappe.db.exists("Contact", self.m.contact))
 		r = frappe.db.get_value("CRM Erasure Request", self.name, ["status", "erasure_status"], as_dict=True)
 		self.assertEqual((r.status, r.erasure_status), ("Awaiting Sign-off", "Failed"))
@@ -151,7 +153,10 @@ class TestErasureRecords(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			submit_request(self.name)
 		r = frappe.db.get_value(
-			"CRM Erasure Request", self.name, ["other_names", "decline_reason", "erasure_status"], as_dict=True
+			"CRM Erasure Request",
+			self.name,
+			["other_names", "decline_reason", "erasure_status"],
+			as_dict=True,
 		)
 		self.assertEqual((r.other_names, r.decline_reason, r.erasure_status), (None, None, "Queued"))
 
@@ -193,17 +198,25 @@ class TestErasureRecords(IntegrationTestCase):
 		new_address = f"Erased person {self.name}"
 		self.assertFalse(frappe.db.exists("Address", address.name))
 		row = frappe.db.get_value(
-			"Address", new_address, ["address_title", "address_line1", "city", "email_id", "address_type"], as_dict=True
+			"Address",
+			new_address,
+			["address_title", "address_line1", "city", "email_id", "address_type"],
+			as_dict=True,
 		)
 		self.assertEqual(
 			(row.address_title, row.address_line1, row.city, row.email_id, row.address_type),
 			(new_address, "", "", "", "Personal"),
 		)
 		link = frappe.db.get_value(
-			"Dynamic Link", {"parenttype": "Address", "parent": new_address}, ["link_name", "link_title"], as_dict=True
+			"Dynamic Link",
+			{"parenttype": "Address", "parent": new_address},
+			["link_name", "link_title"],
+			as_dict=True,
 		)
 		self.assertEqual((link.link_name, link.link_title), (f"Erased person {self.name}",) * 2)
-		self.assertFalse(frappe.db.exists("Comment", {"reference_doctype": "Address", "comment_type": "Edit"}))
+		self.assertFalse(
+			frappe.db.exists("Comment", {"reference_doctype": "Address", "comment_type": "Edit"})
+		)
 		self.assertFalse(frappe.db.exists("Dynamic Link", {"link_title": ["like", "%Marisol%"]}))
 
 	def test_address_shared_with_organization_survives(self):
@@ -223,7 +236,9 @@ class TestErasureRecords(IntegrationTestCase):
 		frappe.db.set_value("Contact", self.m.contact, "address", office.name)
 		run_erasure(self.name, self.officer)
 		self.assertEqual(frappe.db.get_value("CRM Erasure Request", self.name, "status"), "Erased")
-		row = frappe.db.get_value("Address", office.name, ["address_title", "address_line1", "city"], as_dict=True)
+		row = frappe.db.get_value(
+			"Address", office.name, ["address_title", "address_line1", "city"], as_dict=True
+		)
 		self.assertEqual(
 			(row.address_title, row.address_line1, row.city),
 			("Sierra Foothills Dental Group", "400 Lincoln Way", "Auburn"),
@@ -242,7 +257,9 @@ class TestErasureRecords(IntegrationTestCase):
 		self.assertIn("Contact", [row.link_doctype for row in before])  # linked by her address
 		self.assertTrue(any("Marisol" in (row.link_title or "") for row in before))
 		run_erasure(self.name, self.officer)
-		after = frappe.get_all("Communication Link", {"parent": c}, ["link_doctype", "link_name", "link_title"])
+		after = frappe.get_all(
+			"Communication Link", {"parent": c}, ["link_doctype", "link_name", "link_title"]
+		)
 		placeholder = f"Erased person {self.name}"
 		self.assertEqual({row.link_title for row in after}, {placeholder})
 		self.assertIn(("Contact", placeholder), [(row.link_doctype, row.link_name) for row in after])
@@ -265,7 +282,8 @@ class TestErasureRecords(IntegrationTestCase):
 			frappe.db.set_value("CRM Deal", deal, "next_step", "Send Marisol the proposal")
 		frappe.set_user(self.officer)
 		save_request(
-			self.name, {"matches": [{"reference_doctype": "CRM Deal", "reference_name": removed, "confirmed": 1}]}
+			self.name,
+			{"matches": [{"reference_doctype": "CRM Deal", "reference_name": removed, "confirmed": 1}]},
 		)
 		frappe.set_user("Administrator")
 		run_erasure(self.name, self.officer)
@@ -275,7 +293,11 @@ class TestErasureRecords(IntegrationTestCase):
 	def test_lead_identifiers_blanked_when_unlisted_and_report_fields_never(self):
 		frappe.db.delete(
 			"CRM Personal Field",
-			{"parenttype": "CRM Privacy Settings", "document_type": "CRM Lead", "fieldname": ["in", ["email", "mobile_no"]]},
+			{
+				"parenttype": "CRM Privacy Settings",
+				"document_type": "CRM Lead",
+				"fieldname": ["in", ["email", "mobile_no"]],
+			},
 		)
 		# A row saved before the settings were validated: status must still survive.
 		frappe.get_doc(
@@ -355,10 +377,13 @@ class TestErasureRecords(IntegrationTestCase):
 		self.assertEqual((r.status, r.erasure_status), ("Awaiting Sign-off", "Failed"))
 
 	def test_request_no_longer_awaiting_sign_off_stops_waiting(self):
-		frappe.db.set_value("CRM Erasure Request", self.name, {"status": "On Hold", "erasure_status": "Queued"})
+		frappe.db.set_value(
+			"CRM Erasure Request", self.name, {"status": "On Hold", "erasure_status": "Queued"}
+		)
 		run_erasure(self.name, self.officer)
 		self.assertEqual(
-			frappe.db.get_value("CRM Erasure Request", self.name, ["status", "erasure_status"]), ("On Hold", "")
+			frappe.db.get_value("CRM Erasure Request", self.name, ["status", "erasure_status"]),
+			("On Hold", ""),
 		)
 		self.assertEqual(frappe.db.get_value("CRM Lead", self.m.lead, "email"), MARISOL_EMAIL)
 
@@ -366,13 +391,19 @@ class TestErasureRecords(IntegrationTestCase):
 		records = (("CRM Lead", self.m.lead), ("CRM Deal", self.m.won_deal), ("CRM Deal", self.m.open_deal))
 		before = {record: frappe.db.get_value(*record, "modified") for record in records}
 		contact_modified = frappe.db.get_value("Contact", self.m.contact, "modified")
-		versions = frappe.db.count("Version", {"ref_doctype": ["in", ["CRM Lead", "CRM Deal", "Contact", "Address"]]})
+		versions = frappe.db.count(
+			"Version", {"ref_doctype": ["in", ["CRM Lead", "CRM Deal", "Contact", "Address"]]}
+		)
 		run_erasure(self.name, self.officer)
 		for record, modified in before.items():
 			self.assertEqual(frappe.db.get_value(*record, "modified"), modified)
-		self.assertEqual(frappe.db.get_value("Contact", f"Erased person {self.name}", "modified"), contact_modified)
 		self.assertEqual(
-			frappe.db.count("Version", {"ref_doctype": ["in", ["CRM Lead", "CRM Deal", "Contact", "Address"]]}),
+			frappe.db.get_value("Contact", f"Erased person {self.name}", "modified"), contact_modified
+		)
+		self.assertEqual(
+			frappe.db.count(
+				"Version", {"ref_doctype": ["in", ["CRM Lead", "CRM Deal", "Contact", "Address"]]}
+			),
 			versions,
 		)
 		# the deals, their values and the organization are still there
@@ -402,7 +433,9 @@ class TestErasureRecords(IntegrationTestCase):
 			run_erasure(self.name, self.officer)
 		# Only the cache clear for the request's own Failed status may follow.
 		extra = list(frappe.db.after_commit._functions)[queued:]
-		self.assertEqual([fn for fn in extra if "clear_document_cache" not in getattr(fn, "__qualname__", "")], [])
+		self.assertEqual(
+			[fn for fn in extra if "clear_document_cache" not in getattr(fn, "__qualname__", "")], []
+		)
 		events = [event for event, _message, _room in getattr(frappe.local, "_realtime_log", [])]
 		self.assertNotIn("doc_rename", events)
 
@@ -433,7 +466,9 @@ class TestErasureRecords(IntegrationTestCase):
 		try:
 			run_erasure(self.name, self.officer)
 			with (
-				patch("frappe.utils.global_search.sync_global_search", side_effect=lambda: sync_value(stale)) as sync,
+				patch(
+					"frappe.utils.global_search.sync_global_search", side_effect=lambda: sync_value(stale)
+				) as sync,
 				patch("frappe.utils.global_search.update_global_search"),
 			):
 				frappe.db.after_commit.run()

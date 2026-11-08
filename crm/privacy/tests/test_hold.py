@@ -10,7 +10,9 @@ from crm.privacy.tests.factories import make_compliance_user, make_marisol, make
 
 
 def _close(deal: str) -> None:
-	frappe.get_doc("CRM Deal", deal).update({"status": "Lost", "lost_reason": "Other", "lost_notes": "x"}).save()
+	frappe.get_doc("CRM Deal", deal).update(
+		{"status": "Lost", "lost_reason": "Other", "lost_notes": "x"}
+	).save()
 
 
 class TestHold(IntegrationTestCase):
@@ -24,7 +26,10 @@ class TestHold(IntegrationTestCase):
 
 	def _submitted(self, m):
 		name = log_request("Contact", m.contact)
-		save_request(name, {"matches": [{"reference_doctype": "CRM Deal", "reference_name": m.open_deal, "confirmed": 1}]})
+		save_request(
+			name,
+			{"matches": [{"reference_doctype": "CRM Deal", "reference_name": m.open_deal, "confirmed": 1}]},
+		)
 		return submit_request(name)
 
 	def test_open_deal_puts_on_hold_and_notifies_owner(self):

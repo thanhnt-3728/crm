@@ -14,7 +14,9 @@ class CRMPersonalField(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
-		document_type: DF.Literal["CRM Lead", "CRM Deal", "Contact", "Contact Email", "Contact Phone", "CRM Contacts"]
+		document_type: DF.Literal[
+			"CRM Lead", "CRM Deal", "Contact", "Contact Email", "Contact Phone", "CRM Contacts"
+		]
 		fieldname: DF.Data
 		parent: DF.Data
 		parentfield: DF.Data

@@ -139,7 +139,9 @@ class TestPlan(IntegrationTestCase):
 		self.assertNotIn(n, p.notes)
 
 	def test_email_in_recipients_cc_bcc(self):
-		a = make_communication(sender="rep@example.com", recipients=f"Marisol Vega <{EMAIL}>, other@example.com")
+		a = make_communication(
+			sender="rep@example.com", recipients=f"Marisol Vega <{EMAIL}>, other@example.com"
+		)
 		b = make_communication(sender="rep@example.com", cc=EMAIL)
 		c = make_communication(sender="rep@example.com", bcc="x@example.com, MARISOL@sierrafoothills.EXAMPLE")
 		p = plan_erasure(self.r)
@@ -168,7 +170,9 @@ class TestPlan(IntegrationTestCase):
 		self.assertIn(linked, p.communications)
 
 	def test_call_log_matched_by_formatted_number_and_recording_flag(self):
-		cl = make_call_log(**{"from": "530.555.0142", "to": "+15550001111", "recording_url": "https://api.twilio.com/r/1"})
+		cl = make_call_log(
+			**{"from": "530.555.0142", "to": "+15550001111", "recording_url": "https://api.twilio.com/r/1"}
+		)
 		p = plan_erasure(self.r)
 		self.assertIn(cl, p.call_logs)
 		self.assertTrue(p.has_recordings)
@@ -234,9 +238,7 @@ class TestPlan(IntegrationTestCase):
 		keep = {x["label"]: x for x in preview(p)["keep"]}
 		shared = keep["Shared addresses (only her link to them is removed)"]
 		self.assertEqual({link["name"] for link in shared["links"]}, {office, together, front_desk})
-		self.assertEqual(
-			next(x for x in preview(p)["remove"] if x["kind"] == "Addresses")["count"], 1
-		)
+		self.assertEqual(next(x for x in preview(p)["remove"] if x["kind"] == "Addresses")["count"], 1)
 
 	def test_files_on_records_emails_and_images(self):
 		on_lead = _file("CRM Lead", self.m.lead, "lead.txt")
@@ -288,7 +290,18 @@ class TestPlan(IntegrationTestCase):
 		remove = {x["kind"]: x for x in out["remove"]}
 		self.assertEqual(
 			[x["kind"] for x in out["remove"]],
-			["Leads", "Contacts", "Deals (still on)", "Addresses", "Emails", "Calls", "Notes", "Tasks", "Comments", "Files"],
+			[
+				"Leads",
+				"Contacts",
+				"Deals (still on)",
+				"Addresses",
+				"Emails",
+				"Calls",
+				"Notes",
+				"Tasks",
+				"Comments",
+				"Files",
+			],
 		)
 		self.assertEqual(remove["Leads"]["count"], 1)
 		self.assertEqual(

@@ -8,7 +8,7 @@ is observed on the Monday after.
 """
 
 from datetime import date, timedelta
-from functools import lru_cache
+from functools import cache
 
 RESPOND_WITHIN_DAYS = 45
 ACKNOWLEDGE_WITHIN_BUSINESS_DAYS = 10
@@ -61,7 +61,7 @@ def _observed(day: date) -> date:
 	return day
 
 
-@lru_cache(maxsize=None)
+@cache
 def _holidays(year: int) -> dict:
 	holidays = {}
 	# The next year's New Year's Day may be observed on Dec 31 of this year.

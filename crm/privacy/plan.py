@@ -52,7 +52,16 @@ CONTACT_VALUE_FIELDS = (
 )
 
 CUSTOM_FIELD_DOCTYPES = (LEAD, DEAL, CONTACT)
-CUSTOM_FIELD_TYPES = ("Data", "Small Text", "Text", "Long Text", "Phone", "Attach", "Attach Image", "Text Editor")
+CUSTOM_FIELD_TYPES = (
+	"Data",
+	"Small Text",
+	"Text",
+	"Long Text",
+	"Phone",
+	"Attach",
+	"Attach Image",
+	"Text Editor",
+)
 
 
 @dataclass
@@ -85,7 +94,9 @@ def _unique(names) -> list[str]:
 	return list(dict.fromkeys(str(name) for name in names if name not in (None, "")))
 
 
-def _on_records(doctype: str, doctype_field: str, name_field: str, records: dict[str, list[str]]) -> list[str]:
+def _on_records(
+	doctype: str, doctype_field: str, name_field: str, records: dict[str, list[str]]
+) -> list[str]:
 	"""Names of `doctype` rows pointing at any of `records` ({doctype: [names]})."""
 	found: list[str] = []
 	for record_doctype, names in records.items():
@@ -96,7 +107,9 @@ def _on_records(doctype: str, doctype_field: str, name_field: str, records: dict
 	return found
 
 
-def _parents_linked(parent_doctype: str, child_doctype: str, doctype_field: str, name_field: str, records) -> list[str]:
+def _parents_linked(
+	parent_doctype: str, child_doctype: str, doctype_field: str, name_field: str, records
+) -> list[str]:
 	"""Parents of `child_doctype` link rows (doctype_field, name_field) that point at `records`."""
 	found: list[str] = []
 	for record_doctype, names in records.items():
@@ -129,18 +142,27 @@ def _communications_with_emails(emails: set[str]) -> list[str]:
 		rows = (
 			frappe.qb.from_(table)
 			.select(table.name, *[getattr(table, column) for column in EMAIL_COLUMNS])
-			.where(Criterion.any([getattr(table, column).like(f"%{like_escape(email)}%") for column in EMAIL_COLUMNS]))
+			.where(
+				Criterion.any(
+					[getattr(table, column).like(f"%{like_escape(email)}%") for column in EMAIL_COLUMNS]
+				)
+			)
 			.run(as_dict=True)
 		)
 		found += [
-			row.name for row in rows if any(_header_has_email(row.get(column), {email}) for column in EMAIL_COLUMNS)
+			row.name
+			for row in rows
+			if any(_header_has_email(row.get(column), {email}) for column in EMAIL_COLUMNS)
 		]
 	return found
 
 
 def _her_values(leads: list[str], contacts: list[str]) -> dict[str, set[str]]:
 	values: dict[str, set[str]] = {}
-	for doctype, names, fields in ((LEAD, leads, LEAD_VALUE_FIELDS), (CONTACT, contacts, CONTACT_VALUE_FIELDS)):
+	for doctype, names, fields in (
+		(LEAD, leads, LEAD_VALUE_FIELDS),
+		(CONTACT, contacts, CONTACT_VALUE_FIELDS),
+	):
 		for name in names:
 			row = frappe.db.get_value(doctype, name, list(fields), as_dict=True) or {}
 			for fieldname in fields:
@@ -166,7 +188,9 @@ def _deals_split(
 				parent_doctype=DEAL,
 			)
 		)
-	for row in frappe.get_all(DEAL, filters={"name": ["in", deals]}, fields=["name", "email", "mobile_no", "phone"]):
+	for row in frappe.get_all(
+		DEAL, filters={"name": ["in", deals]}, fields=["name", "email", "mobile_no", "phone"]
+	):
 		if normalize_identifier("Email", row.email) in emails or any(
 			normalize_identifier("Phone", row.get(column)) in phones for column in ("mobile_no", "phone")
 		):
@@ -223,7 +247,9 @@ def plan_erasure(request) -> ErasurePlan:
 	records = {LEAD: leads, CONTACT: contacts, DEAL: deals_on}
 
 	communications = _on_records("Communication", "reference_doctype", "reference_name", records)
-	communications += _parents_linked("Communication", "Communication Link", "link_doctype", "link_name", records)
+	communications += _parents_linked(
+		"Communication", "Communication Link", "link_doctype", "link_name", records
+	)
 	communications += _communications_with_emails(emails)
 	communications = _unique(communications)
 
@@ -236,11 +262,15 @@ def plan_erasure(request) -> ErasurePlan:
 	notes = _on_records("FCRM Note", "reference_doctype", "reference_docname", records)
 	has_recordings = False
 	if call_logs:
-		logs = frappe.get_all("CRM Call Log", filters={"name": ["in", call_logs]}, fields=["note", "recording_url"])
+		logs = frappe.get_all(
+			"CRM Call Log", filters={"name": ["in", call_logs]}, fields=["note", "recording_url"]
+		)
 		notes += [log.note for log in logs]
 		has_recordings = any((log.recording_url or "").strip() for log in logs)
 
-	files = _on_records("File", "attached_to_doctype", "attached_to_name", {**records, "Communication": communications})
+	files = _on_records(
+		"File", "attached_to_doctype", "attached_to_name", {**records, "Communication": communications}
+	)
 	images = [
 		image
 		for doctype, names in ((LEAD, leads), (CONTACT, contacts))
@@ -302,7 +332,11 @@ def _links(doctype: str, names: list[str]) -> list[dict]:
 
 def _address_links(names: list[str]) -> list[dict]:
 	return [
-		{"doctype": "Address", "name": name, "title": frappe.db.get_value("Address", name, "address_title") or name}
+		{
+			"doctype": "Address",
+			"name": name,
+			"title": frappe.db.get_value("Address", name, "address_title") or name,
+		}
 		for name in names
 	]
 

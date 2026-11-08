@@ -21,17 +21,19 @@ class TestMatching(IntegrationTestCase):
 		confirmed = {(x.reference_doctype, x.reference_name) for x in r.matches if x.confirmed}
 		self.assertEqual(confirmed, {("CRM Lead", m.lead)})
 		suggested = {(x.reference_doctype, x.reference_name) for x in r.matches}
-		self.assertTrue({("Contact", m.contact), ("CRM Deal", m.open_deal), ("CRM Deal", m.won_deal)} <= suggested)
+		self.assertTrue(
+			{("Contact", m.contact), ("CRM Deal", m.open_deal), ("CRM Deal", m.won_deal)} <= suggested
+		)
 
 	def test_phone_in_other_format_matches(self):
-		m = make_marisol()
+		make_marisol()  # her records hold the same number in another format
 		other = create_test_contact(first_name="Front", mobile_no="530.555.0142")
 		r = make_request(identifiers=[{"kind": "Phone", "value": "+1 530 555 0142"}])
 		refresh_matches(r)
 		self.assertIn(("Contact", other.name), {(x.reference_doctype, x.reference_name) for x in r.matches})
 
 	def test_excluded_identifier_does_not_match(self):
-		m = make_marisol()
+		make_marisol()  # records the excluded number would otherwise match
 		r = make_request(identifiers=[{"kind": "Phone", "value": "5305550142", "excluded": 1}])
 		refresh_matches(r)
 		self.assertEqual(r.matches, [])
@@ -41,7 +43,9 @@ class TestMatching(IntegrationTestCase):
 		c = frappe.get_doc("Contact", m.contact)
 		c.append("email_ids", {"email_id": "mv@home.example"})
 		c.save()
-		r = make_request(matches=[{"reference_doctype": "Contact", "reference_name": m.contact, "confirmed": 1}])
+		r = make_request(
+			matches=[{"reference_doctype": "Contact", "reference_name": m.contact, "confirmed": 1}]
+		)
 		refresh_matches(r)
 		self.assertIn(("Email", "mv@home.example"), {(i.kind, i.value) for i in r.identifiers})
 
@@ -66,10 +70,14 @@ class TestMatching(IntegrationTestCase):
 
 	def test_unrelated_records_are_not_suggested(self):
 		make_marisol()
-		stranger = create_test_contact(first_name="Stranger", email="stranger@example.com", mobile_no="2125550100")
+		stranger = create_test_contact(
+			first_name="Stranger", email="stranger@example.com", mobile_no="2125550100"
+		)
 		r = make_request(identifiers=[{"kind": "Email", "value": "marisol@sierrafoothills.example"}])
 		refresh_matches(r)
-		self.assertNotIn(("Contact", stranger.name), {(x.reference_doctype, x.reference_name) for x in r.matches})
+		self.assertNotIn(
+			("Contact", stranger.name), {(x.reference_doctype, x.reference_name) for x in r.matches}
+		)
 
 	def test_refresh_drops_stale_unconfirmed_and_keeps_confirmed(self):
 		m = make_marisol()
@@ -106,7 +114,12 @@ class TestMatching(IntegrationTestCase):
 		self.assertEqual(like_escape("a%b_c\\d"), "a\\%b\\_c\\\\d")
 		table = frappe.qb.DocType("Communication")
 		for pattern in ("%", "_", "marisol_sierrafoothills.example"):
-			hits = frappe.qb.from_(table).select(table.name).where(table.sender.like(f"%{like_escape(pattern)}%")).run()
+			hits = (
+				frappe.qb.from_(table)
+				.select(table.name)
+				.where(table.sender.like(f"%{like_escape(pattern)}%"))
+				.run()
+			)
 			self.assertEqual(len(hits), 0)
 		r = make_request(identifiers=[{"kind": "Email", "value": "%"}, {"kind": "Email", "value": "_"}])
 		self.assertEqual([u["emails"] for u in identifier_usage(r)], [0, 0])
@@ -286,7 +299,10 @@ class TestRequestApi(IntegrationTestCase):
 		frappe.set_user("rep7@example.com")
 		name = log_request()
 		with self.assertRaises(frappe.PermissionError):
-			save_request(name, {"matches": [{"reference_doctype": "CRM Lead", "reference_name": m.lead, "confirmed": 1}]})
+			save_request(
+				name,
+				{"matches": [{"reference_doctype": "CRM Lead", "reference_name": m.lead, "confirmed": 1}]},
+			)
 
 	def test_logger_cannot_save_checklist_or_contract_references(self):
 		make_user("rep8@example.com", ["Sales User"])
@@ -303,7 +319,9 @@ class TestRequestApi(IntegrationTestCase):
 		officer = make_compliance_user()
 		frappe.set_user(officer)
 		name = log_request()
-		out = save_request(name, {"checklist": [{"description": "Delete recordings"}], "contract_references": "MSA-1"})
+		out = save_request(
+			name, {"checklist": [{"description": "Delete recordings"}], "contract_references": "MSA-1"}
+		)
 		row = out["doc"]["checklist"][0]
 		self.assertEqual(row["description"], "Delete recordings")
 		out = save_request(name, {"checklist": [{"name": row["name"], "done": 1}]})
@@ -373,7 +391,8 @@ class TestRequestApi(IntegrationTestCase):
 		stranger = create_test_contact(first_name="Stranger", email="stranger@example.com")
 		name = log_request()
 		out = save_request(
-			name, {"matches": [{"reference_doctype": "Contact", "reference_name": stranger.name, "confirmed": 0}]}
+			name,
+			{"matches": [{"reference_doctype": "Contact", "reference_name": stranger.name, "confirmed": 0}]},
 		)
 		rows = {(x["reference_doctype"], x["reference_name"]): x for x in out["doc"]["matches"]}
 		self.assertEqual(rows[("Contact", stranger.name)]["reason"], "Added manually")

@@ -5,7 +5,9 @@ from crm.privacy.identifiers import hash_identifier, normalize_email, normalize_
 
 class TestIdentifiers(UnitTestCase):
 	def test_email_lowercased_and_trimmed(self):
-		self.assertEqual(normalize_email("  Marisol@SierraFoothills.example "), "marisol@sierrafoothills.example")
+		self.assertEqual(
+			normalize_email("  Marisol@SierraFoothills.example "), "marisol@sierrafoothills.example"
+		)
 
 	def test_phone_formats_normalize_equal(self):
 		forms = ["(530) 555-0142", "530.555.0142", "+1 530 555 0142", "5305550142"]

@@ -106,7 +106,9 @@ def _mentioning(doctype: str, fieldnames, emails: set[str], phones: set[str]) ->
 				conditions.append(_digits(column).like(f"%{like_escape(digits)}%"))
 	if not conditions:
 		return set()
-	return {row[0] for row in frappe.qb.from_(table).select(table.name).where(Criterion.any(conditions)).run()}
+	return {
+		row[0] for row in frappe.qb.from_(table).select(table.name).where(Criterion.any(conditions)).run()
+	}
 
 
 def _sweep_text(
@@ -130,7 +132,9 @@ def _sweep_text(
 			value = row.get(field)
 			if not value or not isinstance(value, str):
 				continue
-			new = content if name in referenced else scrub_identifiers(value, plan.emails, plan.phones, person)
+			new = (
+				content if name in referenced else scrub_identifiers(value, plan.emails, plan.phones, person)
+			)
 			if new != value:
 				values[field] = new
 		_set(doctype, name, values)
@@ -244,7 +248,9 @@ def erase_communications(names: list[str], emails: set[str], phones: set[str], r
 		):
 			title = scrub_identifiers(link.link_title, emails, phones, person) if link.link_title else ""
 			if link.link_title and title != link.link_title:
-				frappe.db.set_value("Communication Link", link.name, "link_title", title, update_modified=False)
+				frappe.db.set_value(
+					"Communication Link", link.name, "link_title", title, update_modified=False
+				)
 
 
 # --- call logs, notes, tasks, comments ----------------------------------------------------
@@ -337,7 +343,8 @@ def _disk_path(file_url: str | None) -> str | None:
 
 def _in_use(file_url: str) -> bool:
 	return bool(
-		frappe.db.exists("File", {"file_url": file_url}) or frappe.db.exists("File", {"thumbnail_url": file_url})
+		frappe.db.exists("File", {"file_url": file_url})
+		or frappe.db.exists("File", {"thumbnail_url": file_url})
 	)
 
 
@@ -371,7 +378,9 @@ def delete_files(filters: dict, request: str, after_commit: list[Callable]) -> l
 		filters={**filters, "is_folder": 0},
 		fields=[
 			"name",
-			*_fields("File", ("file_url", "thumbnail_url", "attached_to_doctype", "attached_to_name", "blob")),
+			*_fields(
+				"File", ("file_url", "thumbnail_url", "attached_to_doctype", "attached_to_name", "blob")
+			),
 		],
 	)
 	if not rows:
@@ -456,7 +465,9 @@ def _sweep_email_queue(plan: ErasurePlan, targets: Targets, content: str, person
 
 	queued = _referencing("Email Queue", "reference_doctype", "reference_name", targets)
 	if plan.communications:
-		queued |= set(frappe.get_all("Email Queue", {"communication": ["in", plan.communications]}, pluck="name"))
+		queued |= set(
+			frappe.get_all("Email Queue", {"communication": ["in", plan.communications]}, pluck="name")
+		)
 	queued |= set(recipients.values())
 	for name in _mentioning("Email Queue", ("message",), plan.emails, plan.phones) - queued:
 		if _holds_identifier(frappe.db.get_value("Email Queue", name, "message"), plan):
@@ -464,12 +475,18 @@ def _sweep_email_queue(plan: ErasurePlan, targets: Targets, content: str, person
 	# Still waiting to go out: a wiped message would be sent as a bare placeholder, so the
 	# whole queued email goes. Rows already sent are kept as a record, with the message wiped.
 	pending = (
-		set(frappe.get_all("Email Queue", {"name": ["in", list(queued)], "status": ["in", PENDING_EMAIL]}, pluck="name"))
+		set(
+			frappe.get_all(
+				"Email Queue", {"name": ["in", list(queued)], "status": ["in", PENDING_EMAIL]}, pluck="name"
+			)
+		)
 		if queued
 		else set()
 	)
 	if pending:
-		frappe.db.delete("Email Queue Recipient", {"parenttype": "Email Queue", "parent": ["in", list(pending)]})
+		frappe.db.delete(
+			"Email Queue Recipient", {"parenttype": "Email Queue", "parent": ["in", list(pending)]}
+		)
 		frappe.db.delete("Email Queue", {"name": ["in", list(pending)]})
 	_wipe("Email Queue", queued - pending, ("message",), content)
 
@@ -490,13 +507,17 @@ def _delete_whatsapp_media(messages: list[str], request: str, after_commit: list
 	`attach` names (a File name, or a URL in older whatsapp versions), attached to no record;
 	one attached to a record stays with that record.
 	"""
-	delete_files({"attached_to_doctype": "WA Message", "attached_to_name": ["in", messages]}, request, after_commit)
+	delete_files(
+		{"attached_to_doctype": "WA Message", "attached_to_name": ["in", messages]}, request, after_commit
+	)
 	if not _fields("WA Message", ("attach",)):
 		return
 	attached = [a for a in frappe.get_all("WA Message", {"name": ["in", messages]}, pluck="attach") if a]
 	if attached:
 		for key in ("name", "file_url"):
-			delete_files({key: ["in", attached], "attached_to_doctype": ["is", "not set"]}, request, after_commit)
+			delete_files(
+				{key: ["in", attached], "attached_to_doctype": ["is", "not set"]}, request, after_commit
+			)
 
 
 def _sweep_whatsapp(
@@ -517,7 +538,10 @@ def _sweep_whatsapp(
 	_wipe("WA Message", messages, ("message",), content)
 	# media_url holds the incoming document's file name; attach names the media File
 	_wipe(
-		"WA Message", messages, ("template_body_parameters", "template_header_parameters", "media_url", "attach"), ""
+		"WA Message",
+		messages,
+		("template_body_parameters", "template_header_parameters", "media_url", "attach"),
+		"",
 	)
 	_sweep_text("WA Message", ("error_message",), set(), messages, plan, content, person)
 
@@ -590,7 +614,11 @@ def _sweep_enrichment_runs(records: Targets, content: str) -> None:
 	listed = personal_fields()
 	for run in runs:
 		values = {"raw_json": "{}", "notes": content, "social_profiles": ""}
-		_set(doctype, run.name, {field: value for field, value in values.items() if field in _fields(doctype, values)})
+		_set(
+			doctype,
+			run.name,
+			{field: value for field, value in values.items() if field in _fields(doctype, values)},
+		)
 		personal = listed.get(run.reference_doctype, set())
 		if not personal or not _exists(child):
 			continue
@@ -601,7 +629,9 @@ def _sweep_enrichment_runs(records: Targets, content: str) -> None:
 			parent_doctype=doctype,
 		)
 		for name in changes:
-			frappe.db.set_value(child, name, {"old_value": content, "new_value": content}, update_modified=False)
+			frappe.db.set_value(
+				child, name, {"old_value": content, "new_value": content}, update_modified=False
+			)
 
 
 # --- the step -------------------------------------------------------------------------------

@@ -59,7 +59,9 @@ def _can(doc, user: str | None = None) -> dict:
 	status = doc.status
 	# Once approved the job re-reads the request, so nothing may change until it has run.
 	queued = doc.erasure_status == "Queued"
-	edit = not queued and ((logger and status == "Logged") or (compliance and status not in ("Erased", "Closed")))
+	edit = not queued and (
+		(logger and status == "Logged") or (compliance and status not in ("Erased", "Closed"))
+	)
 	return {
 		"edit": edit,
 		"submit": edit and status == "Logged",
@@ -183,7 +185,9 @@ def get_requests() -> list[dict]:
 			}
 		)
 	open_rows = sorted((r for r in result if r["status"] != "Closed"), key=lambda r: r["days_left"])
-	closed = sorted((r for r in result if r["status"] == "Closed"), key=lambda r: r["date_received"], reverse=True)
+	closed = sorted(
+		(r for r in result if r["status"] == "Closed"), key=lambda r: r["date_received"], reverse=True
+	)
 	return open_rows + closed
 
 
@@ -240,7 +244,9 @@ def _merge_identifiers(doc, rows: list[dict]) -> None:
 		kind = item.get("kind")
 		if kind not in ("Email", "Phone"):
 			frappe.throw(_("Identifier kind must be Email or Phone"), frappe.ValidationError)
-		doc.append("identifiers", {"kind": kind, "value": item.get("value"), "source": "Typed", "excluded": 0})
+		doc.append(
+			"identifiers", {"kind": kind, "value": item.get("value"), "source": "Typed", "excluded": 0}
+		)
 
 
 def _merge_matches(doc, rows: list[dict]) -> None:
@@ -259,7 +265,9 @@ def _merge_matches(doc, rows: list[dict]) -> None:
 		if not frappe.has_permission(doctype, "read", name):
 			frappe.throw(_("You do not have access to that record"), frappe.PermissionError)
 		confirmed = 1 if item.get("confirmed") else 0
-		same = next((r for r in doc.matches if (r.reference_doctype, r.reference_name) == (doctype, name)), None)
+		same = next(
+			(r for r in doc.matches if (r.reference_doctype, r.reference_name) == (doctype, name)), None
+		)
 		if same:
 			same.confirmed = confirmed or same.confirmed
 			continue
@@ -299,7 +307,9 @@ def save_request(name: str, values: dict) -> dict:
 		frappe.throw(_("Invalid values"), frappe.ValidationError)
 	unknown = [key for key in values if key not in ALLOWED_KEYS]
 	if unknown:
-		frappe.throw(_("These fields cannot be changed here: {0}").format(", ".join(unknown)), frappe.ValidationError)
+		frappe.throw(
+			_("These fields cannot be changed here: {0}").format(", ".join(unknown)), frappe.ValidationError
+		)
 	for key in TABLE_KEYS:
 		if key in values:
 			rows = values[key] or []
@@ -472,7 +482,11 @@ def download_blocked_email_attachment(email: str, file: str) -> None:
 	row = frappe.db.get_value(
 		"File", file, ["name", "attached_to_doctype", "attached_to_name", "is_folder"], as_dict=True
 	)
-	if not row or row.is_folder or (row.attached_to_doctype, row.attached_to_name) != ("Communication", doc.name):
+	if (
+		not row
+		or row.is_folder
+		or (row.attached_to_doctype, row.attached_to_name) != ("Communication", doc.name)
+	):
 		frappe.throw(_("This email is not available"), frappe.PermissionError)
 	attachment = frappe.get_doc("File", row.name)
 	frappe.local.response.filename = attachment.file_name
@@ -481,7 +495,9 @@ def download_blocked_email_attachment(email: str, file: str) -> None:
 
 
 @frappe.whitelist()
-def close_request(name: str, date_answered: str | None, outcome: str, denial_reason: str | None = None) -> dict:
+def close_request(
+	name: str, date_answered: str | None, outcome: str, denial_reason: str | None = None
+) -> dict:
 	"""Close an erased or declined request and wipe what is left of the person on it.
 
 	There is no undo: the identifiers, matches and free text are removed.

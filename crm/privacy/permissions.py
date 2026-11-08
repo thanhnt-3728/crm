@@ -54,6 +54,4 @@ def get_permission_query_conditions(user: str | None = None) -> str:
 	roles = _roles(user)
 	if "Compliance" in roles or "Sales Manager" in roles:
 		return ""
-	return (
-		f"(`tab{DOCTYPE}`.logged_by = {frappe.db.escape(user)} and `tab{DOCTYPE}`.status = 'Logged')"
-	)
+	return f"(`tab{DOCTYPE}`.logged_by = {frappe.db.escape(user)} and `tab{DOCTYPE}`.status = 'Logged')"

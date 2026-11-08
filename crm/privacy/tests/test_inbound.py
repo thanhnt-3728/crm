@@ -8,9 +8,9 @@ from frappe.utils import now_datetime
 from frappe.utils.file_manager import save_file
 
 from crm.fcrm.doctype.crm_deal.test_crm_deal import create_test_contact
-from crm.privacy.identifiers import add_do_not_contact
 from crm.permissions.test_org_hierarchy import make_user
 from crm.privacy.api import download_blocked_email_attachment, get_blocked_email
+from crm.privacy.identifiers import add_do_not_contact
 from crm.privacy.inbound import (
 	BLOCKED_INBOUND_SUBJECT,
 	blocked_email,
@@ -253,7 +253,10 @@ class TestInbound(IntegrationTestCase):
 	def test_blocked_email_uses_persisted_state_only(self):
 		add_do_not_contact("Email", EMAIL, "PDR-0001")
 		c = make_communication(
-			sender=EMAIL, sent_or_received="Received", communication_medium="Email", email_account=make_email_account()
+			sender=EMAIL,
+			sent_or_received="Received",
+			communication_medium="Email",
+			email_account=make_email_account(),
 		)
 		self.assertEqual(blocked_email(c).name, c)
 		self.assertIsNone(blocked_email("no-such-communication"))
@@ -343,8 +346,12 @@ class TestBlockedEmailView(IntegrationTestCase):
 		on_request = self._received("open.request@example.com")
 		self.assertEqual(frappe.db.get_value("Communication", on_request, "reference_name"), open_request)
 		on_lead = self._received(EMAIL)
-		lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Theo", "email": "theo@example.com"}).insert()
-		frappe.db.set_value("Communication", on_lead, {"reference_doctype": "CRM Lead", "reference_name": lead.name})
+		lead = frappe.get_doc(
+			{"doctype": "CRM Lead", "first_name": "Theo", "email": "theo@example.com"}
+		).insert()
+		frappe.db.set_value(
+			"Communication", on_lead, {"reference_doctype": "CRM Lead", "reference_name": lead.name}
+		)
 		linked = self._received(EMAIL)
 		frappe.get_doc(
 			{

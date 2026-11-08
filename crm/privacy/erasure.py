@@ -143,7 +143,10 @@ def _record_failure(request: str, error: str, pending: dict) -> None:
 	# must not lose the Failed status (the request would show "Erasing…" for ever).
 	with suppress(Exception):
 		frappe.log_error(
-			title=f"Erasure failed for {request}", message=error, reference_doctype=DOCTYPE, reference_name=request
+			title=f"Erasure failed for {request}",
+			message=error,
+			reference_doctype=DOCTYPE,
+			reference_name=request,
 		)
 
 
@@ -176,7 +179,9 @@ def _error_text(doc: Document, plan: ErasurePlan | None) -> str:
 			names |= plan.her_values.get(key, set())
 
 	text = scrub_identifiers(text, emails, phones, placeholder)
-	words = {part for name in names if name for part in [name.strip(), *name.split()] if len(part.strip()) > 1}
+	words = {
+		part for name in names if name for part in [name.strip(), *name.split()] if len(part.strip()) > 1
+	}
 	if words:
 		# One pass, longest first, so a placeholder already written is never matched again.
 		alternatives = "|".join(re.escape(word) for word in sorted(words, key=len, reverse=True))
@@ -206,9 +211,13 @@ def _value_fields(doctype: str, fieldnames) -> list:
 
 def _erase_fields(doctype: str, name: str, fields: list, named: tuple[str, ...], placeholder: str) -> None:
 	"""Blank each set field in `fields` and put the placeholder in the `named` fields."""
-	current = frappe.db.get_value(doctype, name, [df.fieldname for df in fields] or ["name"], as_dict=True) or {}
+	current = (
+		frappe.db.get_value(doctype, name, [df.fieldname for df in fields] or ["name"], as_dict=True) or {}
+	)
 	values = {df.fieldname: _blank(df) for df in fields if current.get(df.fieldname)}
-	values.update({fieldname: placeholder for fieldname in named if frappe.get_meta(doctype).has_field(fieldname)})
+	values.update(
+		{fieldname: placeholder for fieldname in named if frappe.get_meta(doctype).has_field(fieldname)}
+	)
 	if values:
 		frappe.db.set_value(doctype, name, values, update_modified=False)
 
@@ -244,7 +253,8 @@ def _erase_deal_contact_rows(plan: ErasurePlan, listed: dict[str, set[str]], pla
 	if not plan.contacts:
 		return
 	fields = _value_fields(
-		DEAL_CONTACT, sorted((listed.get(DEAL_CONTACT, set()) | set(DEAL_CONTACT_FIELDS)) - {"full_name", "contact"})
+		DEAL_CONTACT,
+		sorted((listed.get(DEAL_CONTACT, set()) | set(DEAL_CONTACT_FIELDS)) - {"full_name", "contact"}),
 	)
 	table = frappe.qb.DocType(DEAL_CONTACT)
 	query = frappe.qb.update(table).set(table.full_name, placeholder)
@@ -273,7 +283,9 @@ def _erase_deal_identifiers(plan: ErasurePlan) -> None:
 					.where(column.like(f"%{like_escape(email)}%"))
 					.run(as_dict=True)
 				)
-				found += [row.name for row in rows if normalize_identifier("Email", row.get(fieldname)) == email]
+				found += [
+					row.name for row in rows if normalize_identifier("Email", row.get(fieldname)) == email
+				]
 		else:
 			for phone in sorted(plan.phones):
 				found += [row.name for row in phone_rows(DEAL, [fieldname], phone)]
@@ -295,7 +307,9 @@ def _erase_addresses(plan: ErasurePlan, placeholder: str) -> None:
 	fields = [
 		df
 		for df in meta.fields
-		if df.fieldtype in ADDRESS_BLANK_TYPES and df.fieldname not in ADDRESS_KEEP and df.fieldname not in named
+		if df.fieldtype in ADDRESS_BLANK_TYPES
+		and df.fieldname not in ADDRESS_KEEP
+		and df.fieldname not in named
 	]
 	for address in plan.addresses:
 		_erase_fields(ADDRESS, address, fields, named, placeholder)
@@ -315,7 +329,9 @@ def _unlink_shared_addresses(plan: ErasurePlan) -> None:
 		},
 	)
 	for contact in frappe.get_all(
-		CONTACT, filters={"name": ["in", plan.contacts], "address": ["in", plan.shared_addresses]}, pluck="name"
+		CONTACT,
+		filters={"name": ["in", plan.contacts], "address": ["in", plan.shared_addresses]},
+		pluck="name",
 	):
 		frappe.db.set_value(CONTACT, contact, "address", "", update_modified=False)
 
@@ -436,4 +452,8 @@ def erase_records(plan: ErasurePlan, doc: Document, after_commit: list[Callable]
 	_erase_link_titles(plan, placeholder)
 
 
-STEPS: list[Callable[[ErasurePlan, Document, list[Callable]], None]] = [erase_records, sweep_activities, finish]
+STEPS: list[Callable[[ErasurePlan, Document, list[Callable]], None]] = [
+	erase_records,
+	sweep_activities,
+	finish,
+]

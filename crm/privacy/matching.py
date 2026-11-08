@@ -125,10 +125,16 @@ def confirmed_names(request, doctype: str) -> list[str]:
 
 def contact_identifiers(contact: str) -> list[tuple[str, str]]:
 	emails = frappe.get_all(
-		"Contact Email", filters={"parent": contact, "parenttype": CONTACT}, pluck="email_id", parent_doctype=CONTACT
+		"Contact Email",
+		filters={"parent": contact, "parenttype": CONTACT},
+		pluck="email_id",
+		parent_doctype=CONTACT,
 	)
 	phones = frappe.get_all(
-		"Contact Phone", filters={"parent": contact, "parenttype": CONTACT}, pluck="phone", parent_doctype=CONTACT
+		"Contact Phone",
+		filters={"parent": contact, "parenttype": CONTACT},
+		pluck="phone",
+		parent_doctype=CONTACT,
 	)
 	phones.append(frappe.db.get_value(CONTACT, contact, "mobile_no"))
 	return [("Email", e) for e in emails] + [("Phone", p) for p in phones]
@@ -181,7 +187,12 @@ def find_matches(request) -> list[dict]:
 			found.setdefault((DEAL, name), CONTACT_LISTED_REASON)
 
 	return [
-		{"reference_doctype": doctype, "reference_name": name, "title": record_title(doctype, name), "reason": reason}
+		{
+			"reference_doctype": doctype,
+			"reference_name": name,
+			"title": record_title(doctype, name),
+			"reason": reason,
+		}
 		for (doctype, name), reason in found.items()
 	]
 
